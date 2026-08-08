@@ -10,16 +10,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
-# Build tools are only needed at this stage (kept out of the final image).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install dependencies first so this layer is cached unless deps change.
-COPY pyproject.toml ./
+# README.md is copied alongside pyproject.toml because hatchling reads it
+# for the package's `readme` metadata field during the build.
+COPY pyproject.toml README.md ./
 RUN pip install --upgrade pip \
     && pip install .
 
