@@ -113,11 +113,24 @@ cp .env.example .env
 
 docker compose up -d --build
 
-# Pull a model into the running Ollama container (first run only)
+# Pull the generation and embedding models into the running Ollama
+# container (first run only). The embedding model is required for the
+# /documents endpoints — skipping it returns a 500 (Ollama 404s the
+# embeddings call for a model it doesn't have).
 docker compose exec ollama ollama pull llama3.1:8b
+docker compose exec ollama ollama pull nomic-embed-text
 
 curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/health/ready
+
+# Try the RAG pipeline
+curl -X POST http://localhost:8000/api/v1/documents \
+  -H "Content-Type: application/json" \
+  -d '{"text": "FastAPI is a modern Python web framework.", "metadata": {"source": "readme"}}'
+
+curl -X POST http://localhost:8000/api/v1/documents/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What web framework is used?"}'
 ```
 
 API docs (Swagger UI): http://localhost:8000/docs
