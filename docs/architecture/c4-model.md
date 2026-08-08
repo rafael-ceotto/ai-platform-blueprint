@@ -63,11 +63,12 @@ C4Component
         Component(router, "API Router (v1)", "backend/api/v1", "Aggregates versioned endpoint routers")
         Component(deps, "Dependency Providers", "backend/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
         Component(healthEp, "Health Endpoints", "backend/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
-        Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents), search (POST /documents/search), ask (POST /documents/ask)")
+        Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents), upload (POST /documents/upload), search (POST /documents/search), ask (POST /documents/ask)")
         Component(config, "Settings", "backend/config/settings.py", "Typed configuration loaded from env / .env")
         Component(security, "API Key Auth", "backend/api/security.py", "Verifies the X-API-Key header against configured keys")
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
         Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
+        Component(loaders, "Document Loaders", "ingestion/loaders/dispatch.py", "Extracts text from PDF/HTML/TXT/Markdown by extension (see ADR-0005)")
         Component(generation, "Generation Service", "backend/services/generation_service.py", "Orchestrates retrieve -> LCEL chain -> answer")
         Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
         Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
@@ -92,6 +93,8 @@ C4Component
     Rel(documentsEp, security, "authenticates request via (through deps)")
     Rel(documentsEp, rateLimit, "throttles request via (through deps)")
     Rel(documentsEp, ingestion, "delegates ingest to")
+    Rel(documentsEp, loaders, "extracts uploaded file text via")
+    Rel(loaders, ingestion, "hands extracted text to")
     Rel(documentsEp, vectorPort, "delegates search to")
     Rel(documentsEp, generation, "delegates ask to")
     Rel(ingestion, chunking, "splits text via")
@@ -112,12 +115,14 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 4: the `VectorStore`
+- The Component diagram reflects the state after Sprint 5: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through `/documents` and `/documents/search` (tracked alongside
-  ADR-0001), all three document endpoints require a valid API key and are
-  subject to a per-key rate limit (see ADR-0003), and `/documents/ask`
-  runs a LangChain LCEL chain (retriever -> prompt -> chat model) to have
-  the SLM generate an answer instead of returning raw chunks (ADR-0004).
+  ADR-0001), all four document endpoints require a valid API key and are
+  subject to a per-key rate limit (see ADR-0003), `/documents/ask` runs a
+  LangChain LCEL chain (retriever -> prompt -> chat model) to have the
+  SLM generate an answer instead of returning raw chunks (ADR-0004), and
+  `/documents/upload` extracts text from PDF/HTML/TXT/Markdown files
+  before feeding the same ingestion pipeline (ADR-0005).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

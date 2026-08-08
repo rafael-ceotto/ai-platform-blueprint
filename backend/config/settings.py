@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS: int = 60
     RATE_LIMIT_WINDOW_SECONDS: float = 60.0
 
+    # --- Document ingestion (file upload) ---
+    # See docs/adr/0005-document-loaders.md
+    MAX_UPLOAD_SIZE_BYTES: int = 10_000_000
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

@@ -257,3 +257,79 @@ def test_ask_without_api_key_is_rejected(client: TestClient) -> None:
 def test_ask_rejects_empty_query(client: TestClient) -> None:
     response = client.post("/api/v1/documents/ask", json={"query": ""}, headers=AUTH_HEADERS)
     assert response.status_code == 422
+
+
+def test_upload_txt_file_ingests_it(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("notes.txt", b"Uploaded via multipart.", "text/plain")},
+        data={"metadata": '{"source": "upload-test"}'},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["chunk_count"] >= 1
+    assert body["document_id"]
+
+
+def test_upload_html_file_is_extracted_and_ingested(client: TestClient) -> None:
+    html = b"<html><body><p>Extracted HTML content.</p></body></html>"
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("page.html", html, "text/html")},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["chunk_count"] >= 1
+
+
+def test_upload_unsupported_extension_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("archive.zip", b"whatever", "application/zip")},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+def test_upload_invalid_metadata_json_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("notes.txt", b"Hello.", "text/plain")},
+        data={"metadata": "not-json"},
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+def test_upload_without_api_key_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("notes.txt", b"Hello.", "text/plain")},
+    )
+    assert response.status_code == 401
+
+
+def test_upload_over_size_limit_is_rejected() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(
+        API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000, MAX_UPLOAD_SIZE_BYTES=10
+    )
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
+        max_requests=1000, window_seconds=60
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("notes.txt", b"This is longer than ten bytes.", "text/plain")},
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 413

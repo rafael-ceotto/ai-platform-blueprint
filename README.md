@@ -37,10 +37,11 @@ end-to-end retrieval loop on top of it: document ingestion, chunking,
 embedding, and a `VectorStore` port with a FAISS adapter behind it.
 **Sprint 3 — Access Control** added API-key auth and per-key rate
 limiting in front of that pipeline. **Sprint 4 — Answer Generation**
-(this repo) closes the loop: `POST /documents/ask` has the local SLM
-actually generate an answer from retrieved context (via a LangChain LCEL
-chain), instead of only returning raw chunks. Later sprints add
-observability and document-format ingestion.
+closed the loop: `POST /documents/ask` has the local SLM actually
+generate an answer from retrieved context (via a LangChain LCEL chain),
+instead of only returning raw chunks. **Sprint 5 — Document Loaders**
+(this repo) adds `POST /documents/upload` for PDF, Markdown, TXT, and
+HTML files, not just raw JSON text. Later sprints add observability.
 
 ## Architecture
 
@@ -75,6 +76,7 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | LLM runtime | Ollama | Local-first, zero-cost iteration ([ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md)) |
 | Vector store | FAISS | In-process, no extra infra for MVP scale ([ADR-0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md)) |
 | Answer generation | LangChain (`langchain-core` + `langchain-ollama`) | LCEL retriever/prompt/LLM chain over the local SLM ([ADR-0004](docs/adr/0004-langchain-for-answer-generation.md)) |
+| Document loaders | `pypdf` + `beautifulsoup4` | Lightweight PDF/HTML text extraction, no heavy `unstructured` dependency ([ADR-0005](docs/adr/0005-document-loaders.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -97,7 +99,8 @@ ai-platform-blueprint/
 │   ├── models/                  # Pydantic request/response models
 │   └── services/                 # Orchestration (IngestionService, GenerationService)
 ├── ingestion/                 # Document ingestion mechanics
-│   └── chunking/                # Text chunking
+│   ├── chunking/                # Text chunking
+│   └── loaders/                 # PDF / HTML / TXT / Markdown text extraction
 ├── retrieval/                 # Vector search + retrieval
 │   ├── vector_store/            # VectorStore port + FAISS adapter
 │   └── retriever/               # LangChain retriever wrapping VectorStore
@@ -158,6 +161,12 @@ curl -X POST http://localhost:8000/api/v1/documents/ask \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-local-key" \
   -d '{"query": "What web framework is used?"}'
+
+# Or upload a file directly (PDF, Markdown, TXT, or HTML)
+curl -X POST http://localhost:8000/api/v1/documents/upload \
+  -H "X-API-Key: dev-local-key" \
+  -F "file=@/path/to/your/document.pdf" \
+  -F 'metadata={"source": "upload"}'
 ```
 
 API docs (Swagger UI): http://localhost:8000/docs
@@ -194,6 +203,7 @@ All configuration is environment-driven (`backend/config/settings.py`); see
 | `API_KEYS` | `["dev-local-key"]` | Valid `X-API-Key` values for `/documents*`. Empty list fails closed. **Change before deploying.** |
 | `RATE_LIMIT_REQUESTS` | `60` | Max requests per key per window on `/documents*` |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window length, in seconds |
+| `MAX_UPLOAD_SIZE_BYTES` | `10000000` | Max accepted file size for `/documents/upload` (10 MB) |
 
 ## Development
 
@@ -214,6 +224,7 @@ make check        # lint + typecheck + test (what CI runs)
 | `GET` | `/api/v1/health` | Liveness probe — process is up |
 | `GET` | `/api/v1/health/ready` | Readiness probe — verifies Ollama connectivity |
 | `POST` | `/api/v1/documents` * | Ingest a document: chunk, embed, and store it |
+| `POST` | `/api/v1/documents/upload` * | Ingest an uploaded PDF, Markdown, TXT, or HTML file |
 | `POST` | `/api/v1/documents/search` * | Embed a query and return the nearest chunks |
 | `POST` | `/api/v1/documents/ask` * | Retrieve context and have the local SLM generate an answer from it |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
@@ -229,19 +240,21 @@ make check        # lint + typecheck + test (what CI runs)
 | [0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) | LLM runtime: Ollama (local-first) over external APIs, for now |
 | [0003](docs/adr/0003-api-key-auth-and-rate-limiting.md) | Access control: API keys over OAuth2; in-memory rate limiting over Redis, for now |
 | [0004](docs/adr/0004-langchain-for-answer-generation.md) | Answer generation: LangChain LCEL chain (`langchain-core` + `langchain-ollama`) over hand-rolled prompt assembly |
+| [0005](docs/adr/0005-document-loaders.md) | Document loaders: `pypdf` + `beautifulsoup4` over `langchain-community`'s `unstructured`-based loaders |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
 ## Roadmap
 
 Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
-Sprint 3 added access control, and Sprint 4 (this repo) closes the
-retrieval-augmented *generation* half of RAG. Planned next:
+Sprint 3 added access control, Sprint 4 closed the retrieval-augmented
+*generation* half of RAG, and Sprint 5 (this repo) extends ingestion
+beyond raw text. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
 - [x] Answer generation: `POST /documents/ask` — LangChain LCEL chain (retriever + prompt + local SLM)
-- [ ] Document loaders (PDF, Markdown, HTML) for ingestion beyond raw text
+- [x] Document loaders (PDF, Markdown, TXT, HTML) for ingestion beyond raw text
 - [ ] Hybrid retrieval, query routing (LangGraph), re-ranking
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)

@@ -1,15 +1,19 @@
 """Document ingestion and retrieval — the RAG pipeline's HTTP surface.
 
 - `POST /documents`        -> chunk, embed, and store a document's text.
+- `POST /documents/upload` -> same, from an uploaded PDF/Markdown/TXT/HTML
+  file (see docs/adr/0005-document-loaders.md).
 - `POST /documents/search` -> embed a query and return the nearest chunks.
 - `POST /documents/ask`    -> retrieve context and have the SLM generate
   an answer from it (see docs/adr/0004-langchain-for-answer-generation.md).
 
-All three require a valid `X-API-Key` header and are subject to a
+All four require a valid `X-API-Key` header and are subject to a
 per-key rate limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 """
 
-from fastapi import APIRouter, Depends
+import json
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from langchain_core.language_models import BaseChatModel
 
 from backend.api.deps import (
@@ -29,6 +33,7 @@ from backend.models.documents import (
 from backend.models.generation import AskRequest, AskResponse, SourceItem
 from backend.services.generation_service import GenerationService
 from backend.services.ingestion_service import IngestionService
+from ingestion.loaders.dispatch import UnsupportedFileTypeError, load_document
 from llm.ollama.client import OllamaClient
 from retrieval.vector_store.port import VectorStore
 
@@ -45,6 +50,44 @@ async def ingest_document(
 ) -> IngestResponse:
     ingestion = IngestionService(settings, ollama, vector_store)
     result = await ingestion.ingest_document(body.text, body.metadata)
+    return IngestResponse(document_id=result.document_id, chunk_count=result.chunk_count)
+
+
+@router.post(
+    "/documents/upload", response_model=IngestResponse, summary="Upload a document file"
+)
+async def upload_document(
+    file: UploadFile = File(...),
+    metadata: str = Form(default="{}"),
+    settings: Settings = Depends(get_settings),
+    ollama: OllamaClient = Depends(get_ollama_client),
+    vector_store: VectorStore = Depends(get_vector_store),
+    _: None = Depends(enforce_rate_limit),
+) -> IngestResponse:
+    try:
+        parsed_metadata = json.loads(metadata)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="metadata must be valid JSON",
+        ) from exc
+
+    content = await file.read()
+    if len(content) > settings.MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {settings.MAX_UPLOAD_SIZE_BYTES} byte upload limit",
+        )
+
+    try:
+        text = load_document(file.filename or "", content)
+    except UnsupportedFileTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    ingestion = IngestionService(settings, ollama, vector_store)
+    result = await ingestion.ingest_document(text, parsed_metadata)
     return IngestResponse(document_id=result.document_id, chunk_count=result.chunk_count)
 
 
