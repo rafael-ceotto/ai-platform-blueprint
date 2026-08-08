@@ -61,11 +61,16 @@ C4Component
     Container_Boundary(api, "API Service") {
         Component(main, "App Factory", "app/main.py", "Builds the FastAPI app, wires middleware and routers")
         Component(router, "API Router (v1)", "app/api/v1", "Aggregates versioned endpoint routers")
+        Component(deps, "Dependency Providers", "app/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
         Component(healthEp, "Health Endpoints", "app/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
+        Component(documentsEp, "Document Endpoints", "app/api/v1/endpoints/documents.py", "Ingest (POST /documents) and search (POST /documents/search)")
         Component(config, "Settings", "app/core/config.py", "Typed configuration loaded from env / .env")
         Component(logging, "Logging Setup", "app/core/logging.py", "Structured JSON logging configuration")
-        Component(ollamaClient, "Ollama Client", "app/services/ollama_client.py", "Thin async HTTP client for the Ollama API")
-        Component(vectorPort, "VectorStore Port", "app/services (planned)", "Abstraction over the vector backend; FAISS is the current adapter")
+        Component(ollamaClient, "Ollama Client", "app/services/ollama_client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
+        Component(chunking, "Chunking", "app/services/chunking.py", "Splits document text into overlapping chunks")
+        Component(ingestion, "Ingestion Service", "app/services/ingestion.py", "Orchestrates chunk -> embed -> store for a document")
+        Component(vectorPort, "VectorStore Port", "app/services/vector_store.py", "Protocol abstraction over the vector backend")
+        Component(faissStore, "FAISS Adapter", "app/services/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
     }
 
     Container_Ext(ollama, "Ollama", "Container")
@@ -74,18 +79,27 @@ C4Component
     Rel(main, router, "includes")
     Rel(main, logging, "configures at startup")
     Rel(router, healthEp, "mounts")
+    Rel(router, documentsEp, "mounts")
     Rel(healthEp, config, "reads settings from")
     Rel(healthEp, ollamaClient, "checks reachability via")
-    Rel(ollamaClient, ollama, "HTTP", "generate / version")
-    Rel(vectorPort, datavol, "persists index to")
+    Rel(documentsEp, deps, "resolves services via")
+    Rel(documentsEp, ingestion, "delegates ingest to")
+    Rel(documentsEp, vectorPort, "delegates search to")
+    Rel(ingestion, chunking, "splits text via")
+    Rel(ingestion, ollamaClient, "embeds chunks via")
+    Rel(ingestion, vectorPort, "stores vectors via")
+    Rel(vectorPort, faissStore, "implemented by")
+    Rel(ollamaClient, ollama, "HTTP", "generate / embed / version")
+    Rel(faissStore, datavol, "persists index + payloads to")
 ```
 
 ## Notes
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 1: health/readiness
-  wiring and the Ollama client exist; the `VectorStore` port/FAISS adapter
-  is the next piece of work (tracked alongside ADR-0001).
+- The Component diagram reflects the state after Sprint 2: the `VectorStore`
+  port has a FAISS adapter, and the ingestion/chunking pipeline feeds it
+  through the `/documents` and `/documents/search` endpoints (tracked
+  alongside ADR-0001).
 - Keep this file in sync with `app/` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

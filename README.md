@@ -28,9 +28,11 @@ products need on day one:
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
 
-This repository is the foundation laid down in **Sprint 1 — Project
-Foundation**. Later sprints build the RAG pipeline, auth, and observability
-on top of it.
+**Sprint 1 — Project Foundation** laid the base: FastAPI app, health
+probes, config, logging. **Sprint 2 — RAG Pipeline** builds the first
+end-to-end retrieval loop on top of it: document ingestion, chunking,
+embedding, and a `VectorStore` port with a FAISS adapter behind it. Later
+sprints add auth and observability.
 
 ## Architecture
 
@@ -80,11 +82,13 @@ ai-platform-blueprint/
 │   ├── core/                  # Cross-cutting concerns
 │   │   ├── config.py            # Typed settings (env-driven)
 │   │   └── logging.py           # Structured JSON logging
-│   ├── api/v1/                 # Versioned HTTP interface
-│   │   ├── router.py             # Aggregates endpoint routers
-│   │   └── endpoints/health.py   # Liveness / readiness probes
+│   ├── api/                    # Versioned HTTP interface
+│   │   ├── deps.py               # Shared dependency providers (Ollama, VectorStore)
+│   │   └── v1/
+│   │       ├── router.py           # Aggregates endpoint routers
+│   │       └── endpoints/          # health.py, documents.py
 │   ├── schemas/                # Pydantic request/response models
-│   └── services/                # External integrations (Ollama, vector store)
+│   └── services/                # Ollama client, chunking, ingestion, VectorStore port + FAISS adapter
 ├── tests/                     # pytest suite
 ├── docs/
 │   ├── adr/                    # Architecture Decision Records
@@ -143,6 +147,10 @@ All configuration is environment-driven (`app/core/config.py`); see
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama daemon endpoint |
 | `OLLAMA_MODEL` | `llama3.1:8b` | Default model for generation |
 | `VECTOR_STORE_PATH` | `./data/vector_store` | FAISS index location |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Ollama model used to embed chunks and queries |
+| `CHUNK_SIZE` | `500` | Max characters per chunk during ingestion |
+| `CHUNK_OVERLAP` | `50` | Character overlap between adjacent chunks |
+| `SEARCH_TOP_K_DEFAULT` | `5` | Default number of results returned by search |
 
 ## Development
 
@@ -162,6 +170,8 @@ make check        # lint + typecheck + test (what CI runs)
 |---|---|---|
 | `GET` | `/api/v1/health` | Liveness probe — process is up |
 | `GET` | `/api/v1/health/ready` | Readiness probe — verifies Ollama connectivity |
+| `POST` | `/api/v1/documents` | Ingest a document: chunk, embed, and store it |
+| `POST` | `/api/v1/documents/search` | Embed a query and return the nearest chunks |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
 | `GET` | `/redoc` | ReDoc API reference |
 
@@ -176,9 +186,10 @@ New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
 ## Roadmap
 
-Sprint 1 (this repo) establishes the foundation. Planned next:
+Sprint 1 established the foundation; Sprint 2 (this repo) adds the RAG
+pipeline. Planned next:
 
-- [ ] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
+- [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [ ] Auth (API keys / OAuth2) and rate limiting
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)

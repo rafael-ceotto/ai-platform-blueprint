@@ -18,6 +18,7 @@ class OllamaClient:
     def __init__(self, settings: Settings) -> None:
         self._base_url = str(settings.OLLAMA_BASE_URL).rstrip("/")
         self._model = settings.OLLAMA_MODEL
+        self._embedding_model = settings.EMBEDDING_MODEL
         self._timeout = settings.OLLAMA_REQUEST_TIMEOUT_SECONDS
 
     async def is_reachable(self) -> tuple[bool, str | None]:
@@ -40,3 +41,13 @@ class OllamaClient:
             )
             response.raise_for_status()
             return str(response.json()["response"])
+
+    async def embed(self, text: str, *, model: str | None = None) -> list[float]:
+        """Return the embedding vector for `text` using the configured embedding model."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/api/embeddings",
+                json={"model": model or self._embedding_model, "prompt": text},
+            )
+            response.raise_for_status()
+            return [float(x) for x in response.json()["embedding"]]

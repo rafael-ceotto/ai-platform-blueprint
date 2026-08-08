@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     VECTOR_STORE_PATH: str = "./data/vector_store"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
+    # --- RAG pipeline (chunking / retrieval) ---
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 50
+    SEARCH_TOP_K_DEFAULT: int = 5
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
