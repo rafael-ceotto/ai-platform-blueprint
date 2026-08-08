@@ -29,10 +29,11 @@ products need on day one:
   three levels of zoom.
 
 **Sprint 1 — Project Foundation** laid the base: FastAPI app, health
-probes, config, logging. **Sprint 2 — RAG Pipeline** builds the first
+probes, config, logging. **Sprint 2 — RAG Pipeline** built the first
 end-to-end retrieval loop on top of it: document ingestion, chunking,
-embedding, and a `VectorStore` port with a FAISS adapter behind it. Later
-sprints add auth and observability.
+embedding, and a `VectorStore` port with a FAISS adapter behind it.
+**Sprint 3 — Access Control** (this repo) adds API-key auth and per-key
+rate limiting in front of that pipeline. Later sprints add observability.
 
 ## Architecture
 
@@ -81,9 +82,11 @@ ai-platform-blueprint/
 │   ├── main.py                # FastAPI app factory + lifespan
 │   ├── core/                  # Cross-cutting concerns
 │   │   ├── config.py            # Typed settings (env-driven)
-│   │   └── logging.py           # Structured JSON logging
+│   │   ├── logging.py           # Structured JSON logging
+│   │   ├── security.py          # API key verification
+│   │   └── rate_limit.py        # In-memory per-key rate limiter
 │   ├── api/                    # Versioned HTTP interface
-│   │   ├── deps.py               # Shared dependency providers (Ollama, VectorStore)
+│   │   ├── deps.py               # Shared dependency providers (Ollama, VectorStore, auth, rate limit)
 │   │   └── v1/
 │   │       ├── router.py           # Aggregates endpoint routers
 │   │       └── endpoints/          # health.py, documents.py
@@ -123,13 +126,17 @@ docker compose exec ollama ollama pull nomic-embed-text
 curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/health/ready
 
-# Try the RAG pipeline
+# Try the RAG pipeline (POST /documents* requires the X-API-Key header;
+# "dev-local-key" is the default in .env.example — change it before any
+# real deployment)
 curl -X POST http://localhost:8000/api/v1/documents \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-local-key" \
   -d '{"text": "FastAPI is a modern Python web framework.", "metadata": {"source": "readme"}}'
 
 curl -X POST http://localhost:8000/api/v1/documents/search \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-local-key" \
   -d '{"query": "What web framework is used?"}'
 ```
 
@@ -164,6 +171,9 @@ All configuration is environment-driven (`app/core/config.py`); see
 | `CHUNK_SIZE` | `500` | Max characters per chunk during ingestion |
 | `CHUNK_OVERLAP` | `50` | Character overlap between adjacent chunks |
 | `SEARCH_TOP_K_DEFAULT` | `5` | Default number of results returned by search |
+| `API_KEYS` | `["dev-local-key"]` | Valid `X-API-Key` values for `/documents*`. Empty list fails closed. **Change before deploying.** |
+| `RATE_LIMIT_REQUESTS` | `60` | Max requests per key per window on `/documents*` |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window length, in seconds |
 
 ## Development
 
@@ -183,10 +193,12 @@ make check        # lint + typecheck + test (what CI runs)
 |---|---|---|
 | `GET` | `/api/v1/health` | Liveness probe — process is up |
 | `GET` | `/api/v1/health/ready` | Readiness probe — verifies Ollama connectivity |
-| `POST` | `/api/v1/documents` | Ingest a document: chunk, embed, and store it |
-| `POST` | `/api/v1/documents/search` | Embed a query and return the nearest chunks |
+| `POST` | `/api/v1/documents` * | Ingest a document: chunk, embed, and store it |
+| `POST` | `/api/v1/documents/search` * | Embed a query and return the nearest chunks |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
 | `GET` | `/redoc` | ReDoc API reference |
+
+\* Requires an `X-API-Key` header (see [ADR-0003](docs/adr/0003-api-key-auth-and-rate-limiting.md)) and is subject to per-key rate limiting.
 
 ## Architecture Decision Records
 
@@ -194,16 +206,17 @@ make check        # lint + typecheck + test (what CI runs)
 |---|---|
 | [0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md) | Vector store: FAISS (in-process) over Qdrant, for now |
 | [0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) | LLM runtime: Ollama (local-first) over external APIs, for now |
+| [0003](docs/adr/0003-api-key-auth-and-rate-limiting.md) | Access control: API keys over OAuth2; in-memory rate limiting over Redis, for now |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
 ## Roadmap
 
-Sprint 1 established the foundation; Sprint 2 (this repo) adds the RAG
-pipeline. Planned next:
+Sprint 1 established the foundation, Sprint 2 added the RAG pipeline, and
+Sprint 3 (this repo) adds access control. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
-- [ ] Auth (API keys / OAuth2) and rate limiting
+- [x] Auth (API keys / OAuth2) and rate limiting
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
 - [ ] Streaming responses (SSE/WebSocket) for chat-style endpoints

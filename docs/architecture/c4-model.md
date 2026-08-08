@@ -71,6 +71,8 @@ C4Component
         Component(ingestion, "Ingestion Service", "app/services/ingestion.py", "Orchestrates chunk -> embed -> store for a document")
         Component(vectorPort, "VectorStore Port", "app/services/vector_store.py", "Protocol abstraction over the vector backend")
         Component(faissStore, "FAISS Adapter", "app/services/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
+        Component(security, "API Key Auth", "app/core/security.py", "Verifies the X-API-Key header against configured keys")
+        Component(rateLimit, "Rate Limiter", "app/core/rate_limit.py", "In-memory, per-key fixed-window request limiter")
     }
 
     Container_Ext(ollama, "Ollama", "Container")
@@ -83,6 +85,8 @@ C4Component
     Rel(healthEp, config, "reads settings from")
     Rel(healthEp, ollamaClient, "checks reachability via")
     Rel(documentsEp, deps, "resolves services via")
+    Rel(documentsEp, security, "authenticates request via (through deps)")
+    Rel(documentsEp, rateLimit, "throttles request via (through deps)")
     Rel(documentsEp, ingestion, "delegates ingest to")
     Rel(documentsEp, vectorPort, "delegates search to")
     Rel(ingestion, chunking, "splits text via")
@@ -97,9 +101,10 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 2: the `VectorStore`
-  port has a FAISS adapter, and the ingestion/chunking pipeline feeds it
+- The Component diagram reflects the state after Sprint 3: the `VectorStore`
+  port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through the `/documents` and `/documents/search` endpoints (tracked
-  alongside ADR-0001).
+  alongside ADR-0001), and those two endpoints require a valid API key and
+  are subject to a per-key rate limit (see ADR-0003).
 - Keep this file in sync with `app/` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

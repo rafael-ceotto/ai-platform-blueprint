@@ -3,7 +3,10 @@
 Uses fakes for the Ollama client and vector store (via
 `app.dependency_overrides`) so these tests need neither a live Ollama
 daemon nor disk I/O. The real FAISS adapter is covered separately in
-tests/test_faiss_store.py.
+tests/test_faiss_store.py. Auth and rate limiting are exercised against
+the real `require_api_key`/`enforce_rate_limit` dependencies (only their
+inputs — settings and the rate limiter instance — are overridden), since
+those are the thing under test here.
 """
 
 from collections.abc import Iterator
@@ -12,9 +15,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_ollama_client, get_vector_store
+from app.api.deps import get_ollama_client, get_rate_limiter, get_vector_store
+from app.core.config import Settings, get_settings
+from app.core.rate_limit import InMemoryRateLimiter
 from app.main import create_app
 from app.services.vector_store import SearchResult, VectorStore
+
+TEST_API_KEY = "test-key"
+AUTH_HEADERS = {"X-API-Key": TEST_API_KEY}
 
 
 class FakeOllamaClient:
@@ -73,14 +81,27 @@ class FakeVectorStore:
 def client() -> Iterator[TestClient]:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    # get_rate_limiter is a process-wide @lru_cache singleton in the app;
+    # overriding it replaces the *provider*, which FastAPI calls fresh on
+    # every request unless the override itself returns the same instance
+    # each time — so build it once here and close over it, rather than
+    # constructing a new (always-empty) limiter inside the lambda.
+    rate_limiter = InMemoryRateLimiter(max_requests=1000, window_seconds=60)
+    app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
     with TestClient(app) as test_client:
         yield test_client
 
 
 def test_ingest_document_returns_chunk_count(client: TestClient) -> None:
-    response = client.post("/api/v1/documents", json={"text": "Hello world, this is a test."})
+    response = client.post(
+        "/api/v1/documents",
+        json={"text": "Hello world, this is a test."},
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -92,12 +113,14 @@ def test_ingest_and_search_round_trip(client: TestClient) -> None:
     ingest_response = client.post(
         "/api/v1/documents",
         json={"text": "Ollama serves local LLMs.", "metadata": {"source": "test"}},
+        headers=AUTH_HEADERS,
     )
     document_id = ingest_response.json()["document_id"]
 
     search_response = client.post(
         "/api/v1/documents/search",
         json={"query": "Ollama serves local LLMs.", "top_k": 3},
+        headers=AUTH_HEADERS,
     )
 
     assert search_response.status_code == 200
@@ -108,15 +131,61 @@ def test_ingest_and_search_round_trip(client: TestClient) -> None:
 
 
 def test_ingest_rejects_empty_text(client: TestClient) -> None:
-    response = client.post("/api/v1/documents", json={"text": ""})
+    response = client.post("/api/v1/documents", json={"text": ""}, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
 
 def test_search_rejects_empty_query(client: TestClient) -> None:
-    response = client.post("/api/v1/documents/search", json={"query": ""})
+    response = client.post("/api/v1/documents/search", json={"query": ""}, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
 
 def test_search_top_k_out_of_range_rejected(client: TestClient) -> None:
-    response = client.post("/api/v1/documents/search", json={"query": "test", "top_k": 0})
+    response = client.post(
+        "/api/v1/documents/search",
+        json={"query": "test", "top_k": 0},
+        headers=AUTH_HEADERS,
+    )
     assert response.status_code == 422
+
+
+def test_ingest_without_api_key_is_rejected(client: TestClient) -> None:
+    response = client.post("/api/v1/documents", json={"text": "Hello world."})
+    assert response.status_code == 401
+
+
+def test_ingest_with_invalid_api_key_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents",
+        json={"text": "Hello world."},
+        headers={"X-API-Key": "wrong-key"},
+    )
+    assert response.status_code == 401
+
+
+def test_search_without_api_key_is_rejected(client: TestClient) -> None:
+    response = client.post("/api/v1/documents/search", json={"query": "test"})
+    assert response.status_code == 401
+
+
+def test_rate_limit_exceeded_returns_429() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1)
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    rate_limiter = InMemoryRateLimiter(max_requests=1, window_seconds=60)
+    app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+
+    with TestClient(app) as test_client:
+        first = test_client.post(
+            "/api/v1/documents", json={"text": "one."}, headers=AUTH_HEADERS
+        )
+        second = test_client.post(
+            "/api/v1/documents", json={"text": "two."}, headers=AUTH_HEADERS
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert "Retry-After" in second.headers

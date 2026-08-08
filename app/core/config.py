@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 50
     SEARCH_TOP_K_DEFAULT: int = 5
 
+    # --- Auth / rate limiting ---
+    # See docs/adr/0003-api-key-auth-and-rate-limiting.md
+    # An empty list fails closed: every request to a protected endpoint is
+    # rejected rather than silently allowed. Change before any real deploy.
+    API_KEYS: list[str] = Field(default_factory=lambda: ["dev-local-key"])
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: float = 60.0
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

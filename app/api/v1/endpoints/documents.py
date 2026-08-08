@@ -2,11 +2,14 @@
 
 - `POST /documents`        -> chunk, embed, and store a document's text.
 - `POST /documents/search` -> embed a query and return the nearest chunks.
+
+Both require a valid `X-API-Key` header and are subject to a per-key rate
+limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 """
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_ollama_client, get_vector_store
+from app.api.deps import enforce_rate_limit, get_ollama_client, get_vector_store
 from app.core.config import Settings, get_settings
 from app.schemas.documents import (
     IngestRequest,
@@ -28,6 +31,7 @@ async def ingest_document(
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
     vector_store: VectorStore = Depends(get_vector_store),
+    _: None = Depends(enforce_rate_limit),
 ) -> IngestResponse:
     ingestion = IngestionService(settings, ollama, vector_store)
     result = await ingestion.ingest_document(body.text, body.metadata)
@@ -40,6 +44,7 @@ async def search_documents(
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
     vector_store: VectorStore = Depends(get_vector_store),
+    _: None = Depends(enforce_rate_limit),
 ) -> SearchResponse:
     query_vector = await ollama.embed(body.query)
     top_k = body.top_k or settings.SEARCH_TOP_K_DEFAULT
