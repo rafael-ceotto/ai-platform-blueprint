@@ -2,14 +2,22 @@
 
 - `POST /documents`        -> chunk, embed, and store a document's text.
 - `POST /documents/search` -> embed a query and return the nearest chunks.
+- `POST /documents/ask`    -> retrieve context and have the SLM generate
+  an answer from it (see docs/adr/0004-langchain-for-answer-generation.md).
 
-Both require a valid `X-API-Key` header and are subject to a per-key rate
-limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
+All three require a valid `X-API-Key` header and are subject to a
+per-key rate limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 """
 
 from fastapi import APIRouter, Depends
+from langchain_core.language_models import BaseChatModel
 
-from backend.api.deps import enforce_rate_limit, get_ollama_client, get_vector_store
+from backend.api.deps import (
+    enforce_rate_limit,
+    get_chat_model,
+    get_ollama_client,
+    get_vector_store,
+)
 from backend.config.settings import Settings, get_settings
 from backend.models.documents import (
     IngestRequest,
@@ -18,6 +26,8 @@ from backend.models.documents import (
     SearchResponse,
     SearchResultItem,
 )
+from backend.models.generation import AskRequest, AskResponse, SourceItem
+from backend.services.generation_service import GenerationService
 from backend.services.ingestion_service import IngestionService
 from llm.ollama.client import OllamaClient
 from retrieval.vector_store.port import VectorStore
@@ -61,3 +71,28 @@ async def search_documents(
         for match in matches
     ]
     return SearchResponse(results=results)
+
+
+@router.post("/documents/ask", response_model=AskResponse, summary="Ask a question")
+async def ask_documents(
+    body: AskRequest,
+    settings: Settings = Depends(get_settings),
+    ollama: OllamaClient = Depends(get_ollama_client),
+    vector_store: VectorStore = Depends(get_vector_store),
+    chat_model: BaseChatModel = Depends(get_chat_model),
+    _: None = Depends(enforce_rate_limit),
+) -> AskResponse:
+    generation = GenerationService(settings, ollama, vector_store, chat_model)
+    result = await generation.ask(body.query, body.top_k)
+
+    sources = [
+        SourceItem(
+            chunk_id=source.chunk_id,
+            document_id=source.document_id,
+            text=source.text,
+            score=source.score,
+            metadata=source.metadata,
+        )
+        for source in result.sources
+    ]
+    return AskResponse(answer=result.answer, sources=sources)

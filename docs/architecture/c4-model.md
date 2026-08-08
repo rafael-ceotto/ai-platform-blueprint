@@ -63,15 +63,19 @@ C4Component
         Component(router, "API Router (v1)", "backend/api/v1", "Aggregates versioned endpoint routers")
         Component(deps, "Dependency Providers", "backend/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
         Component(healthEp, "Health Endpoints", "backend/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
-        Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents) and search (POST /documents/search)")
+        Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents), search (POST /documents/search), ask (POST /documents/ask)")
         Component(config, "Settings", "backend/config/settings.py", "Typed configuration loaded from env / .env")
         Component(security, "API Key Auth", "backend/api/security.py", "Verifies the X-API-Key header against configured keys")
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
         Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
+        Component(generation, "Generation Service", "backend/services/generation_service.py", "Orchestrates retrieve -> LCEL chain -> answer")
         Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
         Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
         Component(faissStore, "FAISS Adapter", "retrieval/vector_store/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
+        Component(retriever, "LangChain Retriever", "retrieval/retriever/langchain_retriever.py", "BaseRetriever wrapping VectorStore + embedding (see ADR-0004)")
+        Component(ragPrompt, "RAG Prompt", "llm/prompts/rag_prompt.py", "ChatPromptTemplate for context-grounded answers")
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
+        Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
         Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging configuration")
     }
 
@@ -89,10 +93,17 @@ C4Component
     Rel(documentsEp, rateLimit, "throttles request via (through deps)")
     Rel(documentsEp, ingestion, "delegates ingest to")
     Rel(documentsEp, vectorPort, "delegates search to")
+    Rel(documentsEp, generation, "delegates ask to")
     Rel(ingestion, chunking, "splits text via")
     Rel(ingestion, ollamaClient, "embeds chunks via")
     Rel(ingestion, vectorPort, "stores vectors via")
     Rel(vectorPort, faissStore, "implemented by")
+    Rel(generation, retriever, "retrieves context via")
+    Rel(generation, ragPrompt, "formats context/question via")
+    Rel(generation, chatModel, "generates the answer via (LCEL chain)")
+    Rel(retriever, vectorPort, "searches via")
+    Rel(retriever, ollamaClient, "embeds the query via")
+    Rel(chatModel, ollama, "HTTP", "chat completion")
     Rel(ollamaClient, ollama, "HTTP", "generate / embed / version")
     Rel(faissStore, datavol, "persists index + payloads to")
 ```
@@ -101,10 +112,12 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 3: the `VectorStore`
+- The Component diagram reflects the state after Sprint 4: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
-  through the `/documents` and `/documents/search` endpoints (tracked
-  alongside ADR-0001), and those two endpoints require a valid API key and
-  are subject to a per-key rate limit (see ADR-0003).
+  through `/documents` and `/documents/search` (tracked alongside
+  ADR-0001), all three document endpoints require a valid API key and are
+  subject to a per-key rate limit (see ADR-0003), and `/documents/ask`
+  runs a LangChain LCEL chain (retriever -> prompt -> chat model) to have
+  the SLM generate an answer instead of returning raw chunks (ADR-0004).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

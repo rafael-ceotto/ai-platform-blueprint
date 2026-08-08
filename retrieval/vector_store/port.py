@@ -6,7 +6,7 @@ depend on this `Protocol`, not the concrete adapter, so swapping backends
 later is a new adapter, not a rewrite of call sites.
 """
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ class SearchResult(BaseModel):
     metadata: dict[str, Any]
 
 
+@runtime_checkable
 class VectorStore(Protocol):
     def add(
         self,

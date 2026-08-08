@@ -24,6 +24,9 @@ products need on day one:
 - A **vector search** layer built on FAISS for retrieval-augmented
   generation, behind an internal abstraction so the backend can evolve
   without rewriting call sites (see [ADR-0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md)).
+- **Retrieval-augmented generation**, not just retrieval: the local SLM
+  synthesizes answers from retrieved context via a LangChain LCEL chain
+  (see [ADR-0004](docs/adr/0004-langchain-for-answer-generation.md)).
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -32,8 +35,12 @@ products need on day one:
 probes, config, logging. **Sprint 2 — RAG Pipeline** built the first
 end-to-end retrieval loop on top of it: document ingestion, chunking,
 embedding, and a `VectorStore` port with a FAISS adapter behind it.
-**Sprint 3 — Access Control** (this repo) adds API-key auth and per-key
-rate limiting in front of that pipeline. Later sprints add observability.
+**Sprint 3 — Access Control** added API-key auth and per-key rate
+limiting in front of that pipeline. **Sprint 4 — Answer Generation**
+(this repo) closes the loop: `POST /documents/ask` has the local SLM
+actually generate an answer from retrieved context (via a LangChain LCEL
+chain), instead of only returning raw chunks. Later sprints add
+observability and document-format ingestion.
 
 ## Architecture
 
@@ -67,6 +74,7 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | Config | Pydantic Settings | Typed, validated, env/`.env`-driven configuration |
 | LLM runtime | Ollama | Local-first, zero-cost iteration ([ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md)) |
 | Vector store | FAISS | In-process, no extra infra for MVP scale ([ADR-0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md)) |
+| Answer generation | LangChain (`langchain-core` + `langchain-ollama`) | LCEL retriever/prompt/LLM chain over the local SLM ([ADR-0004](docs/adr/0004-langchain-for-answer-generation.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -87,13 +95,15 @@ ai-platform-blueprint/
 │   │   ├── rate_limit.py          # In-memory per-key rate limiter
 │   │   └── v1/                    # router.py, endpoints/ (health.py, documents.py)
 │   ├── models/                  # Pydantic request/response models
-│   └── services/                 # Orchestration (e.g. IngestionService)
+│   └── services/                 # Orchestration (IngestionService, GenerationService)
 ├── ingestion/                 # Document ingestion mechanics
 │   └── chunking/                # Text chunking
-├── retrieval/                 # Vector search
-│   └── vector_store/            # VectorStore port + FAISS adapter
+├── retrieval/                 # Vector search + retrieval
+│   ├── vector_store/            # VectorStore port + FAISS adapter
+│   └── retriever/               # LangChain retriever wrapping VectorStore
 ├── llm/                       # Model runtime clients
-│   └── ollama/                  # Ollama HTTP client
+│   ├── ollama/                  # Ollama HTTP client (generate + embed)
+│   └── prompts/                 # RAG prompt templates
 ├── observability/             # Cross-cutting operational concerns
 │   └── logging/                 # Structured JSON logging
 ├── tests/                     # pytest suite
@@ -139,6 +149,12 @@ curl -X POST http://localhost:8000/api/v1/documents \
   -d '{"text": "FastAPI is a modern Python web framework.", "metadata": {"source": "readme"}}'
 
 curl -X POST http://localhost:8000/api/v1/documents/search \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-local-key" \
+  -d '{"query": "What web framework is used?"}'
+
+# Or have the SLM generate an answer instead of raw chunks
+curl -X POST http://localhost:8000/api/v1/documents/ask \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-local-key" \
   -d '{"query": "What web framework is used?"}'
@@ -199,6 +215,7 @@ make check        # lint + typecheck + test (what CI runs)
 | `GET` | `/api/v1/health/ready` | Readiness probe — verifies Ollama connectivity |
 | `POST` | `/api/v1/documents` * | Ingest a document: chunk, embed, and store it |
 | `POST` | `/api/v1/documents/search` * | Embed a query and return the nearest chunks |
+| `POST` | `/api/v1/documents/ask` * | Retrieve context and have the local SLM generate an answer from it |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
 | `GET` | `/redoc` | ReDoc API reference |
 
@@ -211,16 +228,21 @@ make check        # lint + typecheck + test (what CI runs)
 | [0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md) | Vector store: FAISS (in-process) over Qdrant, for now |
 | [0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) | LLM runtime: Ollama (local-first) over external APIs, for now |
 | [0003](docs/adr/0003-api-key-auth-and-rate-limiting.md) | Access control: API keys over OAuth2; in-memory rate limiting over Redis, for now |
+| [0004](docs/adr/0004-langchain-for-answer-generation.md) | Answer generation: LangChain LCEL chain (`langchain-core` + `langchain-ollama`) over hand-rolled prompt assembly |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
 ## Roadmap
 
-Sprint 1 established the foundation, Sprint 2 added the RAG pipeline, and
-Sprint 3 (this repo) adds access control. Planned next:
+Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
+Sprint 3 added access control, and Sprint 4 (this repo) closes the
+retrieval-augmented *generation* half of RAG. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
+- [x] Answer generation: `POST /documents/ask` — LangChain LCEL chain (retriever + prompt + local SLM)
+- [ ] Document loaders (PDF, Markdown, HTML) for ingestion beyond raw text
+- [ ] Hybrid retrieval, query routing (LangGraph), re-ranking
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
 - [ ] Streaming responses (SSE/WebSocket) for chat-style endpoints

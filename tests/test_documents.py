@@ -14,12 +14,20 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.language_models import FakeListChatModel
 
-from backend.api.deps import get_ollama_client, get_rate_limiter, get_vector_store
+from backend.api.deps import (
+    get_chat_model,
+    get_ollama_client,
+    get_rate_limiter,
+    get_vector_store,
+)
 from backend.api.rate_limit import InMemoryRateLimiter
 from backend.config.settings import Settings, get_settings
 from backend.main import create_app
 from retrieval.vector_store.port import SearchResult, VectorStore
+
+FAKE_ANSWER = "The retrieved context says so."
 
 TEST_API_KEY = "test-key"
 AUTH_HEADERS = {"X-API-Key": TEST_API_KEY}
@@ -92,6 +100,9 @@ def client() -> Iterator[TestClient]:
     # constructing a new (always-empty) limiter inside the lambda.
     rate_limiter = InMemoryRateLimiter(max_requests=1000, window_seconds=60)
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
+        responses=[FAKE_ANSWER]
+    )
     with TestClient(app) as test_client:
         yield test_client
 
@@ -189,3 +200,60 @@ def test_rate_limit_exceeded_returns_429() -> None:
     assert first.status_code == 200
     assert second.status_code == 429
     assert "Retry-After" in second.headers
+
+
+def test_ask_generates_answer_from_retrieved_context(client: TestClient) -> None:
+    client.post(
+        "/api/v1/documents",
+        json={"text": "Ollama serves local LLMs.", "metadata": {"source": "test"}},
+        headers=AUTH_HEADERS,
+    )
+
+    response = client.post(
+        "/api/v1/documents/ask",
+        json={"query": "Ollama serves local LLMs."},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == FAKE_ANSWER
+    assert len(body["sources"]) >= 1
+    assert body["sources"][0]["text"]
+
+
+def test_ask_with_no_matching_documents_skips_generation() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
+        max_requests=1000, window_seconds=60
+    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
+        responses=[FAKE_ANSWER]
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/documents/ask",
+            json={"query": "anything"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] != FAKE_ANSWER
+    assert body["sources"] == []
+
+
+def test_ask_without_api_key_is_rejected(client: TestClient) -> None:
+    response = client.post("/api/v1/documents/ask", json={"query": "test"})
+    assert response.status_code == 401
+
+
+def test_ask_rejects_empty_query(client: TestClient) -> None:
+    response = client.post("/api/v1/documents/ask", json={"query": ""}, headers=AUTH_HEADERS)
+    assert response.status_code == 422

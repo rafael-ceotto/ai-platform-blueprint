@@ -8,6 +8,8 @@ or touching disk.
 from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Security, status
+from langchain_core.language_models import BaseChatModel
+from langchain_ollama import ChatOllama
 
 from backend.api.rate_limit import InMemoryRateLimiter
 from backend.api.security import api_key_header, verify_api_key
@@ -18,6 +20,10 @@ from retrieval.vector_store.faiss_store import FaissVectorStore
 
 def get_ollama_client(settings: Settings = Depends(get_settings)) -> OllamaClient:
     return OllamaClient(settings)
+
+
+def get_chat_model(settings: Settings = Depends(get_settings)) -> BaseChatModel:
+    return ChatOllama(model=settings.OLLAMA_MODEL, base_url=str(settings.OLLAMA_BASE_URL))
 
 
 @lru_cache
