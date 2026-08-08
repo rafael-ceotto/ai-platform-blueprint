@@ -7,7 +7,7 @@ integrating over the API, not end users authenticating interactively.
 
 from fastapi.security import APIKeyHeader
 
-from app.core.config import Settings
+from backend.config.settings import Settings
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 

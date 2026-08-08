@@ -4,10 +4,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.config import Settings
-from app.services.chunking import chunk_text
-from app.services.ollama_client import OllamaClient
-from app.services.vector_store import VectorStore
+from backend.config.settings import Settings
+from ingestion.chunking.chunker import chunk_text
+from llm.ollama.client import OllamaClient
+from retrieval.vector_store.port import VectorStore
 
 
 @dataclass

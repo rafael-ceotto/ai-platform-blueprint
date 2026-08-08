@@ -9,7 +9,7 @@ import logging
 
 import httpx
 
-from app.core.config import Settings
+from backend.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 

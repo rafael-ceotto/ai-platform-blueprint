@@ -42,7 +42,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["backend", "ingestion", "retrieval", "llm", "observability"]
 
 [tool.ruff]
 line-length = 100
@@ -53,7 +53,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N"]
 ignore = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app"]
+known-first-party = ["backend", "ingestion", "retrieval", "llm", "observability"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -72,8 +72,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --cov=app --cov-report=term-missing"
+addopts = "-ra --cov=backend --cov=ingestion --cov=retrieval --cov=llm --cov=observability --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["app"]
+source = ["backend", "ingestion", "retrieval", "llm", "observability"]
 omit = ["tests/*"]

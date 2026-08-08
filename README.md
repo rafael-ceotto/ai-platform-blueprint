@@ -78,20 +78,24 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 
 ```
 ai-platform-blueprint/
-├── app/                      # Application source
-│   ├── main.py                # FastAPI app factory + lifespan
-│   ├── core/                  # Cross-cutting concerns
-│   │   ├── config.py            # Typed settings (env-driven)
-│   │   ├── logging.py           # Structured JSON logging
-│   │   ├── security.py          # API key verification
-│   │   └── rate_limit.py        # In-memory per-key rate limiter
-│   ├── api/                    # Versioned HTTP interface
-│   │   ├── deps.py               # Shared dependency providers (Ollama, VectorStore, auth, rate limit)
-│   │   └── v1/
-│   │       ├── router.py           # Aggregates endpoint routers
-│   │       └── endpoints/          # health.py, documents.py
-│   ├── schemas/                # Pydantic request/response models
-│   └── services/                # Ollama client, chunking, ingestion, VectorStore port + FAISS adapter
+├── backend/                  # HTTP surface + orchestration
+│   ├── main.py                 # FastAPI app factory + lifespan
+│   ├── config/                  # Typed settings (env-driven)
+│   ├── api/                     # Versioned HTTP interface
+│   │   ├── deps.py                # Shared dependency providers
+│   │   ├── security.py            # API key verification
+│   │   ├── rate_limit.py          # In-memory per-key rate limiter
+│   │   └── v1/                    # router.py, endpoints/ (health.py, documents.py)
+│   ├── models/                  # Pydantic request/response models
+│   └── services/                 # Orchestration (e.g. IngestionService)
+├── ingestion/                 # Document ingestion mechanics
+│   └── chunking/                # Text chunking
+├── retrieval/                 # Vector search
+│   └── vector_store/            # VectorStore port + FAISS adapter
+├── llm/                       # Model runtime clients
+│   └── ollama/                  # Ollama HTTP client
+├── observability/             # Cross-cutting operational concerns
+│   └── logging/                 # Structured JSON logging
 ├── tests/                     # pytest suite
 ├── docs/
 │   ├── adr/                    # Architecture Decision Records
@@ -152,12 +156,12 @@ pip install -e ".[dev]"
 cp .env.example .env
 
 # Run Ollama separately (native install or `docker run -p 11434:11434 ollama/ollama`)
-make run   # or: uvicorn app.main:app --reload
+make run   # or: uvicorn backend.main:app --reload
 ```
 
 ## Configuration
 
-All configuration is environment-driven (`app/core/config.py`); see
+All configuration is environment-driven (`backend/config/settings.py`); see
 [`.env.example`](.env.example) for the full list. Key variables:
 
 | Variable | Default | Description |

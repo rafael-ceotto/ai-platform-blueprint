@@ -51,28 +51,28 @@ C4Container
 
 ## Level 3 — Components (API Service)
 
-Internal structure of the `api` container, mirroring the `app/` package
-layout.
+Internal structure spanning the `backend`, `ingestion`, `retrieval`,
+`llm`, and `observability` top-level packages.
 
 ```mermaid
 C4Component
     title Component Diagram — API Service
 
     Container_Boundary(api, "API Service") {
-        Component(main, "App Factory", "app/main.py", "Builds the FastAPI app, wires middleware and routers")
-        Component(router, "API Router (v1)", "app/api/v1", "Aggregates versioned endpoint routers")
-        Component(deps, "Dependency Providers", "app/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
-        Component(healthEp, "Health Endpoints", "app/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
-        Component(documentsEp, "Document Endpoints", "app/api/v1/endpoints/documents.py", "Ingest (POST /documents) and search (POST /documents/search)")
-        Component(config, "Settings", "app/core/config.py", "Typed configuration loaded from env / .env")
-        Component(logging, "Logging Setup", "app/core/logging.py", "Structured JSON logging configuration")
-        Component(ollamaClient, "Ollama Client", "app/services/ollama_client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
-        Component(chunking, "Chunking", "app/services/chunking.py", "Splits document text into overlapping chunks")
-        Component(ingestion, "Ingestion Service", "app/services/ingestion.py", "Orchestrates chunk -> embed -> store for a document")
-        Component(vectorPort, "VectorStore Port", "app/services/vector_store.py", "Protocol abstraction over the vector backend")
-        Component(faissStore, "FAISS Adapter", "app/services/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
-        Component(security, "API Key Auth", "app/core/security.py", "Verifies the X-API-Key header against configured keys")
-        Component(rateLimit, "Rate Limiter", "app/core/rate_limit.py", "In-memory, per-key fixed-window request limiter")
+        Component(main, "App Factory", "backend/main.py", "Builds the FastAPI app, wires middleware and routers")
+        Component(router, "API Router (v1)", "backend/api/v1", "Aggregates versioned endpoint routers")
+        Component(deps, "Dependency Providers", "backend/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
+        Component(healthEp, "Health Endpoints", "backend/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
+        Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents) and search (POST /documents/search)")
+        Component(config, "Settings", "backend/config/settings.py", "Typed configuration loaded from env / .env")
+        Component(security, "API Key Auth", "backend/api/security.py", "Verifies the X-API-Key header against configured keys")
+        Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
+        Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
+        Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
+        Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
+        Component(faissStore, "FAISS Adapter", "retrieval/vector_store/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
+        Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
+        Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging configuration")
     }
 
     Container_Ext(ollama, "Ollama", "Container")
@@ -106,5 +106,5 @@ C4Component
   through the `/documents` and `/documents/search` endpoints (tracked
   alongside ADR-0001), and those two endpoints require a valid API key and
   are subject to a per-key rate limit (see ADR-0003).
-- Keep this file in sync with `app/` structure as new containers/components
+- Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

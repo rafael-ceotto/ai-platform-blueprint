@@ -9,9 +9,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 
-from app.core.config import Settings, get_settings
-from app.schemas.health import DependencyStatus, HealthResponse, ReadinessResponse
-from app.services.ollama_client import OllamaClient
+from backend.config.settings import Settings, get_settings
+from backend.models.health import DependencyStatus, HealthResponse, ReadinessResponse
+from llm.ollama.client import OllamaClient
 
 router = APIRouter(tags=["health"])
 

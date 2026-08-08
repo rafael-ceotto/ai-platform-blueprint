@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.faiss_store import FaissVectorStore
+from retrieval.vector_store.faiss_store import FaissVectorStore
 
 
 def _unit_vectors() -> tuple[list[list[float]], list[str], list[str], list[dict[str, str]]]:

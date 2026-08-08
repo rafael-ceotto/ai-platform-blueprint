@@ -4,7 +4,7 @@ install:
 	pip install -e ".[dev]"
 
 run:
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 test:
 	pytest
@@ -17,7 +17,7 @@ format:
 	ruff check --fix .
 
 typecheck:
-	mypy app
+	mypy backend ingestion retrieval llm observability
 
 check: lint typecheck test
 

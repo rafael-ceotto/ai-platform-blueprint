@@ -1,7 +1,7 @@
 """Tests for API key verification."""
 
-from app.core.config import Settings
-from app.core.security import verify_api_key
+from backend.api.security import verify_api_key
+from backend.config.settings import Settings
 
 
 def _settings(api_keys: list[str]) -> Settings:

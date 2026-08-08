@@ -82,7 +82,7 @@ embeddings. The two broad options are:
 
 **Default to Ollama as the local-first LLM runtime**, shipped as a service
 in `docker-compose.yml`, with the application talking to it through a
-narrow `OllamaClient` (`app/services/ollama_client.py`).
+narrow `OllamaClient` (`llm/ollama/client.py`).
 
 External providers are not ruled out — they are a natural next step for
 production deployments that need frontier model quality — but they are

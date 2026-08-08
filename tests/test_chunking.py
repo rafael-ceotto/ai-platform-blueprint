@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.chunking import chunk_text
+from ingestion.chunking.chunker import chunk_text
 
 
 def test_empty_text_returns_no_chunks() -> None:

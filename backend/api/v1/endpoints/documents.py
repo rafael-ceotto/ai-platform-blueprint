@@ -9,18 +9,18 @@ limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import enforce_rate_limit, get_ollama_client, get_vector_store
-from app.core.config import Settings, get_settings
-from app.schemas.documents import (
+from backend.api.deps import enforce_rate_limit, get_ollama_client, get_vector_store
+from backend.config.settings import Settings, get_settings
+from backend.models.documents import (
     IngestRequest,
     IngestResponse,
     SearchRequest,
     SearchResponse,
     SearchResultItem,
 )
-from app.services.ingestion import IngestionService
-from app.services.ollama_client import OllamaClient
-from app.services.vector_store import VectorStore
+from backend.services.ingestion_service import IngestionService
+from llm.ollama.client import OllamaClient
+from retrieval.vector_store.port import VectorStore
 
 router = APIRouter(tags=["documents"])
 

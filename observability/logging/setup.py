@@ -10,7 +10,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from app.core.config import get_settings
+from backend.config.settings import get_settings
 
 _RESERVED_LOG_RECORD_ATTRS = frozenset(logging.LogRecord(
     "", 0, "", 0, "", (), None

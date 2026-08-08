@@ -9,11 +9,11 @@ from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Security, status
 
-from app.core.config import Settings, get_settings
-from app.core.rate_limit import InMemoryRateLimiter
-from app.core.security import api_key_header, verify_api_key
-from app.services.faiss_store import FaissVectorStore
-from app.services.ollama_client import OllamaClient
+from backend.api.rate_limit import InMemoryRateLimiter
+from backend.api.security import api_key_header, verify_api_key
+from backend.config.settings import Settings, get_settings
+from llm.ollama.client import OllamaClient
+from retrieval.vector_store.faiss_store import FaissVectorStore
 
 
 def get_ollama_client(settings: Settings = Depends(get_settings)) -> OllamaClient:

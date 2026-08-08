@@ -18,7 +18,7 @@ from typing import Any
 import faiss
 import numpy as np
 
-from app.services.vector_store import SearchResult
+from retrieval.vector_store.port import SearchResult
 
 logger = logging.getLogger(__name__)
 

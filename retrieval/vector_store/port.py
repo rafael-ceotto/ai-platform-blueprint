@@ -1,6 +1,6 @@
 """Port for the vector similarity search backend.
 
-`FaissVectorStore` (`app/services/faiss_store.py`) is the first adapter;
+`FaissVectorStore` (`retrieval/vector_store/faiss_store.py`) is the first adapter;
 see docs/adr/0001-vector-store-faiss-vs-qdrant.md for why. Callers should
 depend on this `Protocol`, not the concrete adapter, so swapping backends
 later is a new adapter, not a rewrite of call sites.

@@ -88,7 +88,7 @@ and functional requirements with the least operational overhead, and keeps
 `docker-compose.yml` limited to the API and the LLM runtime.
 
 To avoid lock-in, retrieval access goes through a small internal
-abstraction (`VectorStore` interface in `app/services`) so the concrete
+abstraction (`VectorStore` interface in `retrieval/vector_store`) so the concrete
 backend is an implementation detail, not something scattered through the
 codebase.
 
@@ -107,7 +107,7 @@ becomes true:
 
 ## Consequences
 
-- `app/services` defines a `VectorStore` port; FAISS is the first (and
+- `retrieval/vector_store` defines a `VectorStore` port; FAISS is the first (and
   currently only) adapter behind it.
 - Index artifacts are treated as data, not code: persisted under
   `VECTOR_STORE_PATH`, excluded from git, included in backup/restore

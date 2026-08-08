@@ -15,11 +15,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_ollama_client, get_rate_limiter, get_vector_store
-from app.core.config import Settings, get_settings
-from app.core.rate_limit import InMemoryRateLimiter
-from app.main import create_app
-from app.services.vector_store import SearchResult, VectorStore
+from backend.api.deps import get_ollama_client, get_rate_limiter, get_vector_store
+from backend.api.rate_limit import InMemoryRateLimiter
+from backend.config.settings import Settings, get_settings
+from backend.main import create_app
+from retrieval.vector_store.port import SearchResult, VectorStore
 
 TEST_API_KEY = "test-key"
 AUTH_HEADERS = {"X-API-Key": TEST_API_KEY}

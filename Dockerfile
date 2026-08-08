@@ -20,7 +20,11 @@ COPY pyproject.toml README.md ./
 RUN pip install --upgrade pip \
     && pip install .
 
-COPY app ./app
+COPY backend ./backend
+COPY ingestion ./ingestion
+COPY retrieval ./retrieval
+COPY llm ./llm
+COPY observability ./observability
 
 # ---- Stage 2: minimal runtime image -----------------------------------------
 FROM python:3.12-slim AS runtime
@@ -35,7 +39,11 @@ RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /build/app ./app
+COPY --from=builder /build/backend ./backend
+COPY --from=builder /build/ingestion ./ingestion
+COPY --from=builder /build/retrieval ./retrieval
+COPY --from=builder /build/llm ./llm
+COPY --from=builder /build/observability ./observability
 
 RUN mkdir -p /app/data && chown -R app:app /app
 
@@ -46,4 +54,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3).status == 200 else sys.exit(1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

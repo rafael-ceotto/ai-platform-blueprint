@@ -104,8 +104,8 @@ doesn't require extra setup; an explicitly empty list fails closed
 
 ## Consequences
 
-- `app/core/security.py` and `app/core/rate_limit.py` hold the two
-  decisions as small, independently testable units; `app/api/deps.py`
+- `backend/api/security.py` and `backend/api/rate_limit.py` hold the two
+  decisions as small, independently testable units; `backend/api/deps.py`
   wires them into FastAPI as `require_api_key` / `enforce_rate_limit`.
 - A future migration to OAuth2 or a shared rate-limit backend is a new
   implementation behind the same dependency functions, not a rewrite of
