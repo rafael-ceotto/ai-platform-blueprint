@@ -27,6 +27,9 @@ products need on day one:
 - **Retrieval-augmented generation**, not just retrieval: the local SLM
   synthesizes answers from retrieved context via a LangChain LCEL chain
   (see [ADR-0004](docs/adr/0004-langchain-for-answer-generation.md)).
+- **Centralized error handling**: unhandled exceptions never leak internal
+  details to callers — always a safe, logged, JSON `500` response, not
+  Starlette's default plain-text page.
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -40,8 +43,11 @@ limiting in front of that pipeline. **Sprint 4 — Answer Generation**
 closed the loop: `POST /documents/ask` has the local SLM actually
 generate an answer from retrieved context (via a LangChain LCEL chain),
 instead of only returning raw chunks. **Sprint 5 — Document Loaders**
-(this repo) adds `POST /documents/upload` for PDF, Markdown, TXT, and
-HTML files, not just raw JSON text. Later sprints add observability.
+added `POST /documents/upload` for PDF, Markdown, TXT, and HTML files,
+not just raw JSON text, and closed out the last piece of Sprint 3's
+scope — centralized error handling so unhandled exceptions return a
+safe, logged JSON response instead of leaking internals. Later sprints
+add observability.
 
 ## Architecture
 

@@ -78,6 +78,7 @@ C4Component
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
         Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
         Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging configuration")
+        Component(errors, "Error Handler", "backend/api/errors.py", "Catch-all for unhandled exceptions: safe JSON 500, always logged")
     }
 
     Container_Ext(ollama, "Ollama", "Container")
@@ -85,6 +86,7 @@ C4Component
 
     Rel(main, router, "includes")
     Rel(main, logging, "configures at startup")
+    Rel(main, errors, "registers as catch-all exception handler")
     Rel(router, healthEp, "mounts")
     Rel(router, documentsEp, "mounts")
     Rel(healthEp, config, "reads settings from")
@@ -121,8 +123,10 @@ C4Component
   ADR-0001), all four document endpoints require a valid API key and are
   subject to a per-key rate limit (see ADR-0003), `/documents/ask` runs a
   LangChain LCEL chain (retriever -> prompt -> chat model) to have the
-  SLM generate an answer instead of returning raw chunks (ADR-0004), and
+  SLM generate an answer instead of returning raw chunks (ADR-0004),
   `/documents/upload` extracts text from PDF/HTML/TXT/Markdown files
-  before feeding the same ingestion pipeline (ADR-0005).
+  before feeding the same ingestion pipeline (ADR-0005), and any
+  unhandled exception in any endpoint returns a safe, logged JSON 500
+  instead of leaking internals (`backend/api/errors.py`).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).
