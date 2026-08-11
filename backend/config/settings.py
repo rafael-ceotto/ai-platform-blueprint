@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     # LLM rerank into the /ask generation context.
     RERANK_TOP_N: int = 3
 
+    # --- Observability: tracing (OpenTelemetry -> Jaeger) / metrics (Prometheus) ---
+    # See docs/adr/0008-observability-tracing-metrics-dashboards.md
+    # Both default off: instrumenting more than one FastAPI app against the
+    # process-global tracer provider / Prometheus registry raises on the
+    # second call, and the test suite calls create_app() many times in one
+    # process. docker-compose.yml flips both on for the live stack, where
+    # create_app() runs exactly once.
+    TRACING_ENABLED: bool = False
+    METRICS_ENABLED: bool = False
+    OTEL_SERVICE_NAME: str = "ai-platform-blueprint-api"
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4317"
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

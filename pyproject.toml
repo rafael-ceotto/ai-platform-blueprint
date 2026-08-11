@@ -37,6 +37,12 @@ dependencies = [
   "rank-bm25>=0.2.2",
   "langchain-classic>=1.0.0",
   "langgraph>=0.2.0",
+  "prometheus-fastapi-instrumentator>=7.0.0",
+  "opentelemetry-api>=1.27.0",
+  "opentelemetry-sdk>=1.27.0",
+  "opentelemetry-instrumentation-fastapi>=0.48b0",
+  "opentelemetry-instrumentation-httpx>=0.48b0",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
 ]
 
 [project.optional-dependencies]

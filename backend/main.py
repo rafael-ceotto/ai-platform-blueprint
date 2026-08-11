@@ -11,6 +11,8 @@ from backend.api.errors import handle_unhandled_exception
 from backend.api.v1.router import api_router
 from backend.config.settings import get_settings
 from observability.logging.setup import configure_logging
+from observability.metrics import setup as metrics
+from observability.tracing import setup as tracing
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,9 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    tracing.instrument_app(app, settings)
+    metrics.instrument_app(app, settings)
 
     return app
 

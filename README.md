@@ -37,6 +37,10 @@ products need on day one:
 - **Streaming answers**: `POST /documents/ask` can stream the generated
   answer token-by-token over Server-Sent Events instead of waiting for
   the full response (see [ADR-0007](docs/adr/0007-sse-streaming.md)).
+- **Observability**: OpenTelemetry distributed tracing (FastAPI + the
+  outgoing calls to Ollama) exported to Jaeger, Prometheus metrics, and
+  a provisioned Grafana dashboard — all live with `docker compose up`
+  (see [ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)).
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -57,9 +61,11 @@ leaking internals. **Sprint 6 — Hybrid Retrieval & Query Routing**
 combines semantic and keyword search via RRF, adds a
 LangGraph router that skips retrieval for queries that don't need it,
 and re-ranks retrieved candidates via the local SLM before generating
-an answer. **Sprint 7 — Streaming** (this repo) added token-by-token
-SSE streaming to `/documents/ask`, reusing the same query graph. Later
-sprints add observability and a minimal demo UI.
+an answer. **Sprint 7 — Streaming** added token-by-token SSE streaming
+to `/documents/ask`, reusing the same query graph. **Sprint 8 —
+Observability** (this repo) added distributed tracing (OpenTelemetry ->
+Jaeger), metrics (Prometheus), and a provisioned Grafana dashboard. The
+last planned step is a minimal demo UI.
 
 ## Architecture
 
@@ -98,6 +104,8 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | Hybrid retrieval | `rank-bm25` + `langchain_classic`'s `EnsembleRetriever` | BM25 + vector search fused via RRF; not `langchain_community` (archived) ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
 | Query routing | LangGraph | Routes each `/ask` query to a direct answer or the full retrieve/rerank/generate path ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
 | Streaming | Server-Sent Events (FastAPI `StreamingResponse`) | Token-by-token `/ask` responses, no new dependency ([ADR-0007](docs/adr/0007-sse-streaming.md)) |
+| Tracing | OpenTelemetry -> Jaeger v2 | FastAPI + httpx auto-instrumentation, OTLP export, log/trace correlation ([ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)) |
+| Metrics & dashboards | `prometheus-fastapi-instrumentator` + Prometheus + Grafana | Default RED metrics, provisioned dashboard, zero click-ops setup ([ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -130,14 +138,19 @@ ai-platform-blueprint/
 │   ├── prompts/                  # RAG / classify / rerank prompt templates
 │   └── routing/                  # LangGraph query-routing graph
 ├── observability/             # Cross-cutting operational concerns
-│   └── logging/                 # Structured JSON logging
+│   ├── logging/                 # Structured JSON logging (+ trace/span correlation)
+│   ├── tracing/                  # OpenTelemetry setup (FastAPI + httpx -> Jaeger)
+│   └── metrics/                  # Prometheus instrumentation (/metrics)
+├── infra/                     # Local observability infra config
+│   ├── prometheus/               # Scrape config
+│   └── grafana/                  # Provisioned datasource + dashboard
 ├── tests/                     # pytest suite
 ├── docs/
 │   ├── adr/                    # Architecture Decision Records
 │   └── architecture/           # C4 model diagrams (Mermaid)
 ├── .github/workflows/ci.yml   # Lint + typecheck + test + build
 ├── Dockerfile                  # Multi-stage, non-root, healthchecked
-├── docker-compose.yml          # api + ollama services
+├── docker-compose.yml          # api + ollama + jaeger + prometheus + grafana
 ├── pyproject.toml              # Deps, tooling config
 └── Makefile                    # Common dev commands
 ```
@@ -206,6 +219,14 @@ curl -N -X POST http://localhost:8000/api/v1/documents/ask \
 
 API docs (Swagger UI): http://localhost:8000/docs
 
+Observability, all live automatically alongside the API:
+
+| UI | URL | What you'll see |
+|---|---|---|
+| Jaeger | http://localhost:16686 | Traces spanning each request and its calls to Ollama, after you've hit a few endpoints |
+| Prometheus | http://localhost:9090/targets | The `api` scrape target reporting `UP` |
+| Grafana | http://localhost:3000 | A provisioned "AI Platform Blueprint - API Overview" dashboard (anonymous viewer access, no login needed) |
+
 ### Option B — Local Python
 
 ```bash
@@ -240,6 +261,9 @@ All configuration is environment-driven (`backend/config/settings.py`); see
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window length, in seconds |
 | `MAX_UPLOAD_SIZE_BYTES` | `10000000` | Max accepted file size for `/documents/upload` (10 MB) |
 | `RERANK_TOP_N` | `3` | How many hybrid-retrieved candidates survive LLM re-ranking into `/ask`'s generation context |
+| `TRACING_ENABLED` | `false` | OpenTelemetry tracing on/off. `docker-compose.yml` sets this `true` for the live stack; off by default (incl. tests) — see [ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md) |
+| `METRICS_ENABLED` | `false` | Prometheus `/metrics` endpoint on/off. Same on/off pattern as `TRACING_ENABLED` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Where traces are exported (OTLP/gRPC); `http://jaeger:4317` in Docker |
 
 ## Development
 
@@ -279,6 +303,7 @@ make check        # lint + typecheck + test (what CI runs)
 | [0005](docs/adr/0005-document-loaders.md) | Document loaders: `pypdf` + `beautifulsoup4` over `langchain-community`'s `unstructured`-based loaders |
 | [0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md) | Hybrid retrieval (hand-rolled BM25 + `langchain_classic`'s `EnsembleRetriever`), LangGraph query routing, SLM-based re-ranking |
 | [0007](docs/adr/0007-sse-streaming.md) | Streaming answers: Server-Sent Events over WebSocket, `stream` request field over a separate endpoint, same query graph reused via `.astream()` |
+| [0008](docs/adr/0008-observability-tracing-metrics-dashboards.md) | Observability: OpenTelemetry (FastAPI + httpx) exported to Jaeger v2 over OTLP; `prometheus-fastapi-instrumentator` + Prometheus + a provisioned Grafana dashboard |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
@@ -287,8 +312,8 @@ New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
 Sprint 3 added access control, Sprint 4 closed the retrieval-augmented
 *generation* half of RAG, Sprint 5 extended ingestion beyond raw text,
-Sprint 6 improved retrieval quality itself, and Sprint 7 (this repo)
-added streaming. Planned next:
+Sprint 6 improved retrieval quality itself, Sprint 7 added streaming,
+and Sprint 8 (this repo) added observability. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
@@ -296,7 +321,7 @@ added streaming. Planned next:
 - [x] Document loaders (PDF, Markdown, TXT, HTML) for ingestion beyond raw text
 - [x] Hybrid retrieval, query routing (LangGraph), re-ranking
 - [x] Streaming responses (SSE) for `/documents/ask`
-- [ ] Observability: request tracing, metrics (Prometheus), dashboards
+- [x] Observability: request tracing (OpenTelemetry -> Jaeger), metrics (Prometheus), dashboards (Grafana)
 - [ ] A minimal demo UI (Streamlit) beyond Swagger — planned as the last step
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
 

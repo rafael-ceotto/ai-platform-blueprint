@@ -18,6 +18,10 @@ services:
       API_V1_PREFIX: /api/v1
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      TRACING_ENABLED: "true"
+      METRICS_ENABLED: "true"
+      OTEL_SERVICE_NAME: "ai-platform-blueprint-api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     volumes:
       - ./backend:/app/backend:ro
       - ./ingestion:/app/ingestion:ro
@@ -28,6 +32,8 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
@@ -61,6 +67,47 @@ services:
     #         - driver: nvidia
     #           count: all
     #           capabilities: [gpu]
+
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0
+    container_name: ai-platform-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    networks:
+      - platform
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-platform-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - platform
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-platform-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - platform
 
 networks:
   platform:

@@ -18,11 +18,16 @@ C4Context
 
     System_Ext(ollama, "Ollama Runtime", "Local LLM inference daemon (generation + embeddings)")
     System_Ext(externalLLM, "External LLM Provider", "Optional hosted model API for higher-quality inference (future, see ADR-0002)")
+    System_Ext(jaeger, "Jaeger", "Distributed tracing backend + UI (see ADR-0008)")
+    System_Ext(grafana, "Grafana", "Metrics dashboards, backed by Prometheus (see ADR-0008)")
 
     Rel(user, platform, "Sends requests to", "HTTPS/JSON")
     Rel(developer, platform, "Integrates via", "REST API")
+    Rel(developer, jaeger, "Inspects request traces via", "HTTPS")
+    Rel(developer, grafana, "Inspects metrics dashboards via", "HTTPS")
     Rel(platform, ollama, "Requests completions/embeddings from", "HTTP")
     Rel(platform, externalLLM, "Optionally requests completions from", "HTTPS (not enabled by default)")
+    Rel(platform, jaeger, "Exports traces to", "OTLP/gRPC")
 ```
 
 ## Level 2 — Containers
@@ -42,11 +47,17 @@ C4Container
     }
 
     Container_Ext(ollama, "Ollama", "Container / ollama/ollama", "Serves open-weight LLMs for generation and embeddings (see ADR-0002)")
+    Container_Ext(jaeger, "Jaeger", "Container / jaegertracing/jaeger:2.20.0", "Receives + stores traces via native OTLP ingestion, serves the trace UI (see ADR-0008)")
+    Container_Ext(prometheus, "Prometheus", "Container / prom/prometheus", "Scrapes /metrics on the API service every 10s (see ADR-0008)")
+    Container_Ext(grafana, "Grafana", "Container / grafana/grafana", "Provisioned Prometheus datasource + starter dashboard (see ADR-0008)")
 
     Rel(user, api, "HTTPS requests", "JSON/REST")
     Rel(api, vectorstore, "Similarity search / upsert", "in-process call")
     Rel(vectorstore, datavol, "Reads/writes index", "filesystem")
     Rel(api, ollama, "Generate / embed", "HTTP :11434")
+    Rel(api, jaeger, "Exports request + outbound-HTTP spans", "OTLP/gRPC :4317")
+    Rel(prometheus, api, "Scrapes", "HTTP GET /metrics")
+    Rel(grafana, prometheus, "Queries", "PromQL / HTTP")
 ```
 
 ## Level 3 — Components (API Service)
@@ -81,12 +92,16 @@ C4Component
         Component(ragPrompt, "Prompts", "llm/prompts/*.py", "RAG / classify / rerank / direct-answer ChatPromptTemplates")
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
         Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
-        Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging configuration")
+        Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging; adds trace_id/span_id when a span is active (see ADR-0008)")
         Component(errors, "Error Handler", "backend/api/errors.py", "Catch-all for unhandled exceptions: safe JSON 500, always logged")
+        Component(tracingSetup, "Tracing Setup", "observability/tracing/setup.py", "Builds the TracerProvider, instruments FastAPI + httpx; no-op unless Settings.TRACING_ENABLED (see ADR-0008)")
+        Component(metricsSetup, "Metrics Setup", "observability/metrics/setup.py", "Exposes /metrics via prometheus-fastapi-instrumentator; no-op unless Settings.METRICS_ENABLED (see ADR-0008)")
     }
 
     Container_Ext(ollama, "Ollama", "Container")
     ContainerDb_Ext(datavol, "Data Volume")
+    Container_Ext(jaeger, "Jaeger", "Container")
+    Container_Ext(prometheus, "Prometheus", "Container")
 
     Rel(main, router, "includes")
     Rel(main, logging, "configures at startup")
@@ -120,13 +135,18 @@ C4Component
     Rel(chatModel, ollama, "HTTP", "chat completion")
     Rel(ollamaClient, ollama, "HTTP", "generate / embed / version")
     Rel(faissStore, datavol, "persists index + payloads to")
+    Rel(main, tracingSetup, "instruments app + httpx at startup")
+    Rel(main, metricsSetup, "exposes /metrics at startup")
+    Rel(tracingSetup, jaeger, "exports spans to", "OTLP/gRPC")
+    Rel(tracingSetup, logging, "spans read by, for trace_id/span_id correlation")
+    Rel(prometheus, metricsSetup, "scrapes", "HTTP GET /metrics")
 ```
 
 ## Notes
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 7: the `VectorStore`
+- The Component diagram reflects the state after Sprint 8: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through `/documents` (tracked alongside ADR-0001), all four document
   endpoints require a valid API key and are subject to a per-key rate
@@ -142,5 +162,10 @@ C4Component
   Generation Service drives the same Query Graph via `astream()` instead
   of `ainvoke()`, and the Document Endpoints route its output through the
   SSE Formatter instead of returning a single JSON body (ADR-0007).
+  Tracing Setup and Metrics Setup are wired into the App Factory at
+  startup, both disabled by default (`Settings.TRACING_ENABLED` /
+  `Settings.METRICS_ENABLED`) and enabled only in `docker-compose.yml`,
+  where Jaeger, Prometheus, and Grafana run as sibling containers
+  (ADR-0008).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).
