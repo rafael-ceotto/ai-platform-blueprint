@@ -126,3 +126,76 @@ async def test_ask_reranks_multiple_candidates_before_generating() -> None:
 
     assert result.answer == FAKE_ANSWER
     assert len(result.sources) == 2
+
+
+async def test_ask_stream_yields_tokens_only_from_generate_node() -> None:
+    results = [
+        SearchResult(
+            id="doc-1:0",
+            score=0.9,
+            text="Ollama runs SLMs locally.",
+            metadata={"document_id": "doc-1", "chunk_index": 0},
+        )
+    ]
+    store = FakeHybridStore(results)
+    service = GenerationService(
+        _settings(),
+        FakeOllamaClient(),
+        store,
+        FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+    )
+
+    events = [event async for event in service.ask_stream("How do SLMs run?", top_k=None)]
+
+    token_events = [e for e in events if e["type"] == "token"]
+    done_events = [e for e in events if e["type"] == "done"]
+    streamed_answer = "".join(e["content"] for e in token_events)
+
+    assert len(done_events) == 1
+    assert streamed_answer == FAKE_ANSWER
+    # The classify call's own streamed tokens ("RETRIEVE") must never
+    # leak into the client-facing token events.
+    assert "RETRIEVE" not in streamed_answer
+    assert done_events[0]["answer"] == FAKE_ANSWER
+    assert done_events[0]["sources"][0]["chunk_id"] == "doc-1:0"
+
+
+async def test_ask_stream_direct_answer_path_streams_tokens_too() -> None:
+    store = FakeHybridStore([])
+    service = GenerationService(
+        _settings(),
+        FakeOllamaClient(),
+        store,
+        FakeListChatModel(responses=["DIRECT", "Hi there!"]),
+    )
+
+    events = [event async for event in service.ask_stream("hi", top_k=None)]
+
+    token_events = [e for e in events if e["type"] == "token"]
+    done_events = [e for e in events if e["type"] == "done"]
+
+    assert "".join(e["content"] for e in token_events) == "Hi there!"
+    assert done_events[0]["answer"] == "Hi there!"
+    assert done_events[0]["sources"] == []
+
+
+async def test_ask_stream_with_no_documents_has_no_tokens_but_final_answer() -> None:
+    store = FakeHybridStore([])
+    service = GenerationService(
+        _settings(),
+        FakeOllamaClient(),
+        store,
+        FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+    )
+
+    events = [event async for event in service.ask_stream("anything", top_k=None)]
+
+    token_events = [e for e in events if e["type"] == "token"]
+    done_events = [e for e in events if e["type"] == "done"]
+
+    # no_context_answer never calls the chat model, so there's nothing to
+    # stream token-by-token -- the fixed answer only ever appears in the
+    # final "done" event.
+    assert token_events == []
+    assert done_events[0]["answer"] == NO_CONTEXT_ANSWER
+    assert done_events[0]["sources"] == []

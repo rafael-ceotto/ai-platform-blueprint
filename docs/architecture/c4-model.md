@@ -69,8 +69,9 @@ C4Component
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
         Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
         Component(loaders, "Document Loaders", "ingestion/loaders/dispatch.py", "Extracts text from PDF/HTML/TXT/Markdown by extension (see ADR-0005)")
-        Component(generation, "Generation Service", "backend/services/generation_service.py", "Thin wrapper: builds the query graph once, invokes it per request")
+        Component(generation, "Generation Service", "backend/services/generation_service.py", "Thin wrapper: builds the query graph once, invokes it per request; ask() blocks for the full answer, ask_stream() drives the same graph via astream() (see ADR-0007)")
         Component(queryGraph, "Query Graph", "llm/routing/query_graph.py", "LangGraph StateGraph: classify -> direct-answer, or hybrid-retrieve -> rerank -> generate (see ADR-0006)")
+        Component(sse, "SSE Formatter", "backend/api/sse.py", "Formats an async event stream as Server-Sent Events; turns mid-stream exceptions into a final error event (see ADR-0007)")
         Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
         Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
         Component(faissStore, "FAISS Adapter", "retrieval/vector_store/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar; exposes payloads() for BM25")
@@ -102,6 +103,7 @@ C4Component
     Rel(loaders, ingestion, "hands extracted text to")
     Rel(documentsEp, hybridRetriever, "delegates search to")
     Rel(documentsEp, generation, "delegates ask to")
+    Rel(documentsEp, sse, "formats ask_stream() output via, when stream=true")
     Rel(ingestion, chunking, "splits text via")
     Rel(ingestion, ollamaClient, "embeds chunks via")
     Rel(ingestion, vectorPort, "stores vectors via")
@@ -124,7 +126,7 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 6: the `VectorStore`
+- The Component diagram reflects the state after Sprint 7: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through `/documents` (tracked alongside ADR-0001), all four document
   endpoints require a valid API key and are subject to a per-key rate
@@ -136,6 +138,9 @@ C4Component
   Hybrid Retriever (vector + BM25 fused by RRF). `/documents/ask` additionally
   runs the LangGraph Query Graph: classify -> direct-answer, or
   hybrid-retrieve -> rerank -> generate, all via the local SLM
-  (ADR-0004, ADR-0006).
+  (ADR-0004, ADR-0006). When the request sets `"stream": true`, the same
+  Generation Service drives the same Query Graph via `astream()` instead
+  of `ainvoke()`, and the Document Endpoints route its output through the
+  SSE Formatter instead of returning a single JSON body (ADR-0007).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

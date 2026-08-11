@@ -230,6 +230,52 @@ def test_ask_generates_answer_from_retrieved_context(client: TestClient) -> None
     assert body["sources"][0]["text"]
 
 
+def test_ask_stream_returns_sse_events(client: TestClient) -> None:
+    client.post(
+        "/api/v1/documents",
+        json={"text": "Ollama serves local LLMs.", "metadata": {"source": "test"}},
+        headers=AUTH_HEADERS,
+    )
+
+    response = client.post(
+        "/api/v1/documents/ask",
+        json={"query": "Ollama serves local LLMs.", "stream": True},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: token" in response.text
+    assert "event: done" in response.text
+    assert "data:" in response.text
+
+
+def test_ask_stream_greeting_routes_to_direct_answer() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
+        max_requests=1000, window_seconds=60
+    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
+        responses=["DIRECT", "Hi! How can I help?"]
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/documents/ask",
+            json={"query": "hi there", "stream": True},
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    assert "Hi! How can I help?" in response.text
+    assert "event: done" in response.text
+
+
 def test_ask_with_no_matching_documents_skips_generation() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()

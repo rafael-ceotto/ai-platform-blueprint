@@ -34,6 +34,9 @@ products need on day one:
   (BM25) search fused via Reciprocal Rank Fusion, and a LangGraph query
   router that skips retrieval entirely for greetings/meta questions
   (see [ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)).
+- **Streaming answers**: `POST /documents/ask` can stream the generated
+  answer token-by-token over Server-Sent Events instead of waiting for
+  the full response (see [ADR-0007](docs/adr/0007-sse-streaming.md)).
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -51,10 +54,12 @@ Markdown, TXT, and HTML files, not just raw JSON text, and closed out
 the last piece of Sprint 3's scope — centralized error handling so
 unhandled exceptions return a safe, logged JSON response instead of
 leaking internals. **Sprint 6 — Hybrid Retrieval & Query Routing**
-(this repo) combines semantic and keyword search via RRF, adds a
+combines semantic and keyword search via RRF, adds a
 LangGraph router that skips retrieval for queries that don't need it,
 and re-ranks retrieved candidates via the local SLM before generating
-an answer. Later sprints add observability.
+an answer. **Sprint 7 — Streaming** (this repo) added token-by-token
+SSE streaming to `/documents/ask`, reusing the same query graph. Later
+sprints add observability and a minimal demo UI.
 
 ## Architecture
 
@@ -92,6 +97,7 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | Document loaders | `pypdf` + `beautifulsoup4` | Lightweight PDF/HTML text extraction, no heavy `unstructured` dependency ([ADR-0005](docs/adr/0005-document-loaders.md)) |
 | Hybrid retrieval | `rank-bm25` + `langchain_classic`'s `EnsembleRetriever` | BM25 + vector search fused via RRF; not `langchain_community` (archived) ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
 | Query routing | LangGraph | Routes each `/ask` query to a direct answer or the full retrieve/rerank/generate path ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
+| Streaming | Server-Sent Events (FastAPI `StreamingResponse`) | Token-by-token `/ask` responses, no new dependency ([ADR-0007](docs/adr/0007-sse-streaming.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -189,6 +195,13 @@ curl -X POST http://localhost:8000/api/v1/documents/ask \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-local-key" \
   -d '{"query": "hi, what can you help me with?"}'
+
+# Or stream the answer token-by-token via Server-Sent Events (-N disables
+# curl's output buffering so tokens print as they arrive)
+curl -N -X POST http://localhost:8000/api/v1/documents/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-local-key" \
+  -d '{"query": "What web framework is used?", "stream": true}'
 ```
 
 API docs (Swagger UI): http://localhost:8000/docs
@@ -249,7 +262,7 @@ make check        # lint + typecheck + test (what CI runs)
 | `POST` | `/api/v1/documents` * | Ingest a document: chunk, embed, and store it |
 | `POST` | `/api/v1/documents/upload` * | Ingest an uploaded PDF, Markdown, TXT, or HTML file |
 | `POST` | `/api/v1/documents/search` * | Hybrid (vector + BM25) search, return the nearest chunks |
-| `POST` | `/api/v1/documents/ask` * | Route, retrieve (hybrid), re-rank, and have the local SLM generate an answer |
+| `POST` | `/api/v1/documents/ask` * | Route, retrieve (hybrid), re-rank, and have the local SLM generate an answer. Set `"stream": true` for token-by-token Server-Sent Events instead of a single JSON response |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
 | `GET` | `/redoc` | ReDoc API reference |
 
@@ -265,6 +278,7 @@ make check        # lint + typecheck + test (what CI runs)
 | [0004](docs/adr/0004-langchain-for-answer-generation.md) | Answer generation: LangChain LCEL chain (`langchain-core` + `langchain-ollama`) over hand-rolled prompt assembly |
 | [0005](docs/adr/0005-document-loaders.md) | Document loaders: `pypdf` + `beautifulsoup4` over `langchain-community`'s `unstructured`-based loaders |
 | [0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md) | Hybrid retrieval (hand-rolled BM25 + `langchain_classic`'s `EnsembleRetriever`), LangGraph query routing, SLM-based re-ranking |
+| [0007](docs/adr/0007-sse-streaming.md) | Streaming answers: Server-Sent Events over WebSocket, `stream` request field over a separate endpoint, same query graph reused via `.astream()` |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
@@ -273,16 +287,17 @@ New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
 Sprint 3 added access control, Sprint 4 closed the retrieval-augmented
 *generation* half of RAG, Sprint 5 extended ingestion beyond raw text,
-and Sprint 6 (this repo) improves retrieval quality itself. Planned next:
+Sprint 6 improved retrieval quality itself, and Sprint 7 (this repo)
+added streaming. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
 - [x] Answer generation: `POST /documents/ask` — LangChain LCEL chain (retriever + prompt + local SLM)
 - [x] Document loaders (PDF, Markdown, TXT, HTML) for ingestion beyond raw text
 - [x] Hybrid retrieval, query routing (LangGraph), re-ranking
-- [ ] Streaming responses (SSE) for `/documents/ask`
-- [ ] A minimal demo UI (Streamlit) beyond Swagger — planned as the last step, after streaming
+- [x] Streaming responses (SSE) for `/documents/ask`
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
+- [ ] A minimal demo UI (Streamlit) beyond Swagger — planned as the last step
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
 
 ## Contributing

@@ -6,6 +6,8 @@
 - `POST /documents/search` -> embed a query and return the nearest chunks.
 - `POST /documents/ask`    -> retrieve context and have the SLM generate
   an answer from it (see docs/adr/0004-langchain-for-answer-generation.md).
+  Set `"stream": true` to get the answer as Server-Sent Events instead
+  of a single JSON response (see docs/adr/0007-sse-streaming.md).
 
 All four require a valid `X-API-Key` header and are subject to a
 per-key rate limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
@@ -14,6 +16,7 @@ per-key rate limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from langchain_core.language_models import BaseChatModel
 
 from backend.api.deps import (
@@ -22,6 +25,7 @@ from backend.api.deps import (
     get_ollama_client,
     get_vector_store,
 )
+from backend.api.sse import sse_event_stream
 from backend.config.settings import Settings, get_settings
 from backend.models.documents import (
     IngestRequest,
@@ -125,8 +129,15 @@ async def ask_documents(
     vector_store: HybridVectorStore = Depends(get_vector_store),
     chat_model: BaseChatModel = Depends(get_chat_model),
     _: None = Depends(enforce_rate_limit),
-) -> AskResponse:
+) -> AskResponse | StreamingResponse:
     generation = GenerationService(settings, ollama, vector_store, chat_model)
+
+    if body.stream:
+        return StreamingResponse(
+            sse_event_stream(generation.ask_stream(body.query, body.top_k)),
+            media_type="text/event-stream",
+        )
+
     result = await generation.ask(body.query, body.top_k)
 
     sources = [
