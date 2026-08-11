@@ -6,7 +6,8 @@ from langchain_core.language_models import FakeListChatModel
 
 from backend.config.settings import Settings
 from backend.services.generation_service import GenerationService
-from retrieval.vector_store.port import SearchResult, VectorStore
+from llm.routing.query_graph import NO_CONTEXT_ANSWER
+from retrieval.vector_store.port import SearchResult
 
 FAKE_ANSWER = "Local SLMs run entirely on your machine."
 
@@ -16,7 +17,9 @@ class FakeOllamaClient:
         return [1.0, 0.0, 0.0]
 
 
-class FakeVectorStore:
+class FakeHybridStore:
+    """Satisfies both `VectorStore` and `PayloadSource` (`HybridVectorStore`)."""
+
     def __init__(self, results: list[SearchResult]) -> None:
         self._results = results
 
@@ -35,9 +38,12 @@ class FakeVectorStore:
     def count(self) -> int:
         return len(self._results)
 
+    def payloads(self) -> list[dict[str, Any]]:
+        return [{"id": r.id, "text": r.text, "metadata": r.metadata} for r in self._results]
+
 
 def _settings() -> Settings:
-    return Settings(SEARCH_TOP_K_DEFAULT=5)
+    return Settings(SEARCH_TOP_K_DEFAULT=5, RERANK_TOP_N=3)
 
 
 async def test_ask_returns_generated_answer_and_sources() -> None:
@@ -49,12 +55,14 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
             metadata={"document_id": "doc-1", "chunk_index": 0},
         )
     ]
-    vector_store: VectorStore = FakeVectorStore(results)
+    store = FakeHybridStore(results)
+    # A single retrieved document -> rerank is a no-op (len <= 1), so the
+    # chat model is called exactly twice: classify, then generate.
     service = GenerationService(
         _settings(),
         FakeOllamaClient(),
-        vector_store,
-        FakeListChatModel(responses=[FAKE_ANSWER]),
+        store,
+        FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 
     result = await service.ask("How do SLMs run?", top_k=None)
@@ -66,15 +74,55 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
 
 
 async def test_ask_with_no_retrieved_documents_skips_the_llm() -> None:
-    vector_store: VectorStore = FakeVectorStore([])
+    store = FakeHybridStore([])
+    # Retrieval finds nothing -> routed straight to the fixed no-context
+    # answer, no generation call. Only "RETRIEVE" (classify) is consumed.
     service = GenerationService(
         _settings(),
         FakeOllamaClient(),
-        vector_store,
-        FakeListChatModel(responses=[FAKE_ANSWER]),
+        store,
+        FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 
     result = await service.ask("Anything?", top_k=None)
 
-    assert result.answer != FAKE_ANSWER
+    assert result.answer == NO_CONTEXT_ANSWER
     assert result.sources == []
+
+
+async def test_ask_routes_greeting_to_direct_answer_without_retrieval() -> None:
+    store = FakeHybridStore(
+        [SearchResult(id="a", score=0.9, text="Unrelated content.", metadata={})]
+    )
+    service = GenerationService(
+        _settings(),
+        FakeOllamaClient(),
+        store,
+        FakeListChatModel(responses=["DIRECT", "Hello! How can I help?"]),
+    )
+
+    result = await service.ask("hi there", top_k=None)
+
+    assert result.answer == "Hello! How can I help?"
+    assert result.sources == []
+
+
+async def test_ask_reranks_multiple_candidates_before_generating() -> None:
+    results = [
+        SearchResult(id="a", score=0.9, text="First candidate.", metadata={"document_id": "d1"}),
+        SearchResult(id="b", score=0.8, text="Second candidate.", metadata={"document_id": "d2"}),
+    ]
+    store = FakeHybridStore(results)
+    # Two documents -> rerank actually calls the model: classify, rerank,
+    # generate (three calls, in that order).
+    service = GenerationService(
+        _settings(),
+        FakeOllamaClient(),
+        store,
+        FakeListChatModel(responses=["RETRIEVE", "2,1", FAKE_ANSWER]),
+    )
+
+    result = await service.ask("relevant question", top_k=None)
+
+    assert result.answer == FAKE_ANSWER
+    assert len(result.sources) == 2

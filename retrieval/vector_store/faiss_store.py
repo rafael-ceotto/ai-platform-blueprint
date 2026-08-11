@@ -95,6 +95,17 @@ class FaissVectorStore:
     def count(self) -> int:
         return int(self._index.ntotal) if self._index is not None else 0
 
+    def payloads(self) -> list[dict[str, Any]]:
+        """Return every stored (id, text, metadata) payload.
+
+        The corpus source for the BM25 keyword retriever
+        (`retrieval/retriever/bm25_retriever.py`). Returns a shallow copy
+        of the internal list so callers can't add/remove entries out
+        from under us; the payload dicts themselves are still shared,
+        but callers only ever read them.
+        """
+        return list(self._payloads)
+
     def _load(self) -> None:
         if self._index_path.exists() and self._payloads_path.exists():
             self._index = faiss.read_index(str(self._index_path))

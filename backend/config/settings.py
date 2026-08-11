@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # See docs/adr/0005-document-loaders.md
     MAX_UPLOAD_SIZE_BYTES: int = 10_000_000
 
+    # --- Hybrid retrieval / query routing / re-ranking ---
+    # See docs/adr/0006-hybrid-retrieval-and-query-routing.md
+    # SEARCH_TOP_K_DEFAULT is the initial retrieval breadth (for both
+    # /search and /ask); RERANK_TOP_N is how many of those survive the
+    # LLM rerank into the /ask generation context.
+    RERANK_TOP_N: int = 3
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

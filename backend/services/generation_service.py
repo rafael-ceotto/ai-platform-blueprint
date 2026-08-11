@@ -1,23 +1,19 @@
-"""Orchestrates the answer-generation half of the RAG pipeline.
-
-Retrieves via `VectorStoreRetriever`, then runs an LCEL chain
-(`RAG_PROMPT | chat_model | StrOutputParser()`) over the retrieved
-context. See docs/adr/0004-langchain-for-answer-generation.md.
+"""Orchestrates the answer-generation half of the RAG pipeline via a
+LangGraph query-routing graph (classify -> direct-answer or
+hybrid-retrieve -> rerank -> generate). See
+docs/adr/0006-hybrid-retrieval-and-query-routing.md and
+docs/adr/0004-langchain-for-answer-generation.md.
 """
 
 from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import StrOutputParser
 
 from backend.config.settings import Settings
 from llm.ollama.client import OllamaClient
-from llm.prompts.rag_prompt import RAG_PROMPT
-from retrieval.retriever.langchain_retriever import VectorStoreRetriever
-from retrieval.vector_store.port import VectorStore
-
-_NO_CONTEXT_ANSWER = "I don't have enough information to answer that."
+from llm.routing.query_graph import build_query_graph
+from retrieval.retriever.hybrid import HybridVectorStore
 
 
 @dataclass
@@ -40,28 +36,24 @@ class GenerationService:
         self,
         settings: Settings,
         ollama_client: OllamaClient,
-        vector_store: VectorStore,
+        vector_store: HybridVectorStore,
         chat_model: BaseChatModel,
     ) -> None:
         self._default_top_k = settings.SEARCH_TOP_K_DEFAULT
-        self._ollama = ollama_client
-        self._vector_store = vector_store
-        self._chat_model = chat_model
+        self._rerank_top_n = settings.RERANK_TOP_N
+        self._graph = build_query_graph(vector_store, ollama_client, chat_model)
 
     async def ask(self, query: str, top_k: int | None) -> AskResult:
-        retriever = VectorStoreRetriever(
-            vector_store=self._vector_store,
-            embedder=self._ollama,
-            top_k=top_k or self._default_top_k,
+        result = await self._graph.ainvoke(
+            {
+                "query": query,
+                "top_k": top_k or self._default_top_k,
+                "rerank_top_n": self._rerank_top_n,
+                "route": "retrieve",
+                "documents": [],
+                "answer": "",
+            }
         )
-        documents = await retriever.ainvoke(query)
-
-        if not documents:
-            return AskResult(answer=_NO_CONTEXT_ANSWER, sources=[])
-
-        context = "\n\n".join(f"[{i + 1}] {doc.page_content}" for i, doc in enumerate(documents))
-        chain = RAG_PROMPT | self._chat_model | StrOutputParser()
-        answer = await chain.ainvoke({"context": context, "question": query})
 
         sources = [
             AskSource(
@@ -71,6 +63,6 @@ class GenerationService:
                 score=float(doc.metadata["score"]),
                 metadata=doc.metadata,
             )
-            for doc in documents
+            for doc in result["documents"]
         ]
-        return AskResult(answer=answer, sources=sources)
+        return AskResult(answer=result["answer"], sources=sources)

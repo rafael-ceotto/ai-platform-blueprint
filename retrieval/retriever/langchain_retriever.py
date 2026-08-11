@@ -6,6 +6,11 @@ interface so they can be composed into an LCEL chain in
 `backend/services/generation_service.py`. LangChain doesn't own
 retrieval or embedding here — it consumes them; see
 docs/adr/0004-langchain-for-answer-generation.md.
+
+`Document.id` is set to the chunk id (not just tucked into metadata) so
+`EnsembleRetriever` (see `retrieval/retriever/hybrid.py`,
+ADR-0006) can deduplicate a chunk found by both this retriever and the
+BM25 keyword retriever.
 """
 
 from typing import Protocol, runtime_checkable
@@ -57,6 +62,7 @@ class VectorStoreRetriever(BaseRetriever):
         matches = self.vector_store.search(vector, self.top_k)
         return [
             Document(
+                id=match.id,
                 page_content=match.text,
                 metadata={**match.metadata, "chunk_id": match.id, "score": match.score},
             )

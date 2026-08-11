@@ -69,12 +69,15 @@ C4Component
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
         Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
         Component(loaders, "Document Loaders", "ingestion/loaders/dispatch.py", "Extracts text from PDF/HTML/TXT/Markdown by extension (see ADR-0005)")
-        Component(generation, "Generation Service", "backend/services/generation_service.py", "Orchestrates retrieve -> LCEL chain -> answer")
+        Component(generation, "Generation Service", "backend/services/generation_service.py", "Thin wrapper: builds the query graph once, invokes it per request")
+        Component(queryGraph, "Query Graph", "llm/routing/query_graph.py", "LangGraph StateGraph: classify -> direct-answer, or hybrid-retrieve -> rerank -> generate (see ADR-0006)")
         Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
         Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
-        Component(faissStore, "FAISS Adapter", "retrieval/vector_store/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar")
-        Component(retriever, "LangChain Retriever", "retrieval/retriever/langchain_retriever.py", "BaseRetriever wrapping VectorStore + embedding (see ADR-0004)")
-        Component(ragPrompt, "RAG Prompt", "llm/prompts/rag_prompt.py", "ChatPromptTemplate for context-grounded answers")
+        Component(faissStore, "FAISS Adapter", "retrieval/vector_store/faiss_store.py", "Implements VectorStore with a normalized IndexFlatIP + JSON payload sidecar; exposes payloads() for BM25")
+        Component(vectorRetriever, "Vector Retriever", "retrieval/retriever/langchain_retriever.py", "BaseRetriever wrapping VectorStore + embedding (see ADR-0004)")
+        Component(bm25Retriever, "BM25 Retriever", "retrieval/retriever/bm25_retriever.py", "BaseRetriever rebuilding a rank_bm25 index from FAISS payloads each call (see ADR-0006)")
+        Component(hybridRetriever, "Hybrid Retriever", "retrieval/retriever/hybrid.py", "Fuses vector + BM25 via langchain_classic's EnsembleRetriever (RRF); recomputes rank-based scores")
+        Component(ragPrompt, "Prompts", "llm/prompts/*.py", "RAG / classify / rerank / direct-answer ChatPromptTemplates")
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
         Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
         Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging configuration")
@@ -97,17 +100,21 @@ C4Component
     Rel(documentsEp, ingestion, "delegates ingest to")
     Rel(documentsEp, loaders, "extracts uploaded file text via")
     Rel(loaders, ingestion, "hands extracted text to")
-    Rel(documentsEp, vectorPort, "delegates search to")
+    Rel(documentsEp, hybridRetriever, "delegates search to")
     Rel(documentsEp, generation, "delegates ask to")
     Rel(ingestion, chunking, "splits text via")
     Rel(ingestion, ollamaClient, "embeds chunks via")
     Rel(ingestion, vectorPort, "stores vectors via")
     Rel(vectorPort, faissStore, "implemented by")
-    Rel(generation, retriever, "retrieves context via")
-    Rel(generation, ragPrompt, "formats context/question via")
-    Rel(generation, chatModel, "generates the answer via (LCEL chain)")
-    Rel(retriever, vectorPort, "searches via")
-    Rel(retriever, ollamaClient, "embeds the query via")
+    Rel(generation, queryGraph, "builds once, invokes per request")
+    Rel(queryGraph, hybridRetriever, "retrieves context via (hybrid_retrieve node)")
+    Rel(queryGraph, ragPrompt, "formats classify/rerank/generate prompts via")
+    Rel(queryGraph, chatModel, "classifies, reranks, and generates via")
+    Rel(hybridRetriever, vectorRetriever, "fuses (RRF)")
+    Rel(hybridRetriever, bm25Retriever, "fuses (RRF)")
+    Rel(vectorRetriever, vectorPort, "searches via")
+    Rel(vectorRetriever, ollamaClient, "embeds the query via")
+    Rel(bm25Retriever, faissStore, "reads payloads() from")
     Rel(chatModel, ollama, "HTTP", "chat completion")
     Rel(ollamaClient, ollama, "HTTP", "generate / embed / version")
     Rel(faissStore, datavol, "persists index + payloads to")
@@ -117,16 +124,18 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 5: the `VectorStore`
+- The Component diagram reflects the state after Sprint 6: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
-  through `/documents` and `/documents/search` (tracked alongside
-  ADR-0001), all four document endpoints require a valid API key and are
-  subject to a per-key rate limit (see ADR-0003), `/documents/ask` runs a
-  LangChain LCEL chain (retriever -> prompt -> chat model) to have the
-  SLM generate an answer instead of returning raw chunks (ADR-0004),
-  `/documents/upload` extracts text from PDF/HTML/TXT/Markdown files
-  before feeding the same ingestion pipeline (ADR-0005), and any
-  unhandled exception in any endpoint returns a safe, logged JSON 500
-  instead of leaking internals (`backend/api/errors.py`).
+  through `/documents` (tracked alongside ADR-0001), all four document
+  endpoints require a valid API key and are subject to a per-key rate
+  limit (see ADR-0003), `/documents/upload` extracts text from
+  PDF/HTML/TXT/Markdown files before feeding the same ingestion pipeline
+  (ADR-0005), any unhandled exception in any endpoint returns a safe,
+  logged JSON 500 instead of leaking internals (`backend/api/errors.py`),
+  and both `/documents/search` and `/documents/ask` retrieve via the
+  Hybrid Retriever (vector + BM25 fused by RRF). `/documents/ask` additionally
+  runs the LangGraph Query Graph: classify -> direct-answer, or
+  hybrid-retrieve -> rerank -> generate, all via the local SLM
+  (ADR-0004, ADR-0006).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

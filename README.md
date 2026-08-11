@@ -30,6 +30,10 @@ products need on day one:
 - **Centralized error handling**: unhandled exceptions never leak internal
   details to callers — always a safe, logged, JSON `500` response, not
   Starlette's default plain-text page.
+- **Hybrid retrieval + query routing**: semantic (vector) and keyword
+  (BM25) search fused via Reciprocal Rank Fusion, and a LangGraph query
+  router that skips retrieval entirely for greetings/meta questions
+  (see [ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)).
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -42,12 +46,15 @@ embedding, and a `VectorStore` port with a FAISS adapter behind it.
 limiting in front of that pipeline. **Sprint 4 — Answer Generation**
 closed the loop: `POST /documents/ask` has the local SLM actually
 generate an answer from retrieved context (via a LangChain LCEL chain),
-instead of only returning raw chunks. **Sprint 5 — Document Loaders**
-added `POST /documents/upload` for PDF, Markdown, TXT, and HTML files,
-not just raw JSON text, and closed out the last piece of Sprint 3's
-scope — centralized error handling so unhandled exceptions return a
-safe, logged JSON response instead of leaking internals. Later sprints
-add observability.
+instead of only returning raw chunks. **Sprint 5 — Document Loaders** added `POST /documents/upload` for PDF,
+Markdown, TXT, and HTML files, not just raw JSON text, and closed out
+the last piece of Sprint 3's scope — centralized error handling so
+unhandled exceptions return a safe, logged JSON response instead of
+leaking internals. **Sprint 6 — Hybrid Retrieval & Query Routing**
+(this repo) combines semantic and keyword search via RRF, adds a
+LangGraph router that skips retrieval for queries that don't need it,
+and re-ranks retrieved candidates via the local SLM before generating
+an answer. Later sprints add observability.
 
 ## Architecture
 
@@ -83,6 +90,8 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | Vector store | FAISS | In-process, no extra infra for MVP scale ([ADR-0001](docs/adr/0001-vector-store-faiss-vs-qdrant.md)) |
 | Answer generation | LangChain (`langchain-core` + `langchain-ollama`) | LCEL retriever/prompt/LLM chain over the local SLM ([ADR-0004](docs/adr/0004-langchain-for-answer-generation.md)) |
 | Document loaders | `pypdf` + `beautifulsoup4` | Lightweight PDF/HTML text extraction, no heavy `unstructured` dependency ([ADR-0005](docs/adr/0005-document-loaders.md)) |
+| Hybrid retrieval | `rank-bm25` + `langchain_classic`'s `EnsembleRetriever` | BM25 + vector search fused via RRF; not `langchain_community` (archived) ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
+| Query routing | LangGraph | Routes each `/ask` query to a direct answer or the full retrieve/rerank/generate path ([ADR-0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -109,10 +118,11 @@ ai-platform-blueprint/
 │   └── loaders/                 # PDF / HTML / TXT / Markdown text extraction
 ├── retrieval/                 # Vector search + retrieval
 │   ├── vector_store/            # VectorStore port + FAISS adapter
-│   └── retriever/               # LangChain retriever wrapping VectorStore
-├── llm/                       # Model runtime clients
+│   └── retriever/               # Vector/BM25/hybrid LangChain retrievers
+├── llm/                       # Model runtime clients + orchestration
 │   ├── ollama/                  # Ollama HTTP client (generate + embed)
-│   └── prompts/                 # RAG prompt templates
+│   ├── prompts/                  # RAG / classify / rerank prompt templates
+│   └── routing/                  # LangGraph query-routing graph
 ├── observability/             # Cross-cutting operational concerns
 │   └── logging/                 # Structured JSON logging
 ├── tests/                     # pytest suite
@@ -173,6 +183,12 @@ curl -X POST http://localhost:8000/api/v1/documents/upload \
   -H "X-API-Key: dev-local-key" \
   -F "file=@/path/to/your/document.pdf" \
   -F 'metadata={"source": "upload"}'
+
+# A greeting skips retrieval entirely (LangGraph query routing)
+curl -X POST http://localhost:8000/api/v1/documents/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-local-key" \
+  -d '{"query": "hi, what can you help me with?"}'
 ```
 
 API docs (Swagger UI): http://localhost:8000/docs
@@ -210,6 +226,7 @@ All configuration is environment-driven (`backend/config/settings.py`); see
 | `RATE_LIMIT_REQUESTS` | `60` | Max requests per key per window on `/documents*` |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window length, in seconds |
 | `MAX_UPLOAD_SIZE_BYTES` | `10000000` | Max accepted file size for `/documents/upload` (10 MB) |
+| `RERANK_TOP_N` | `3` | How many hybrid-retrieved candidates survive LLM re-ranking into `/ask`'s generation context |
 
 ## Development
 
@@ -231,8 +248,8 @@ make check        # lint + typecheck + test (what CI runs)
 | `GET` | `/api/v1/health/ready` | Readiness probe — verifies Ollama connectivity |
 | `POST` | `/api/v1/documents` * | Ingest a document: chunk, embed, and store it |
 | `POST` | `/api/v1/documents/upload` * | Ingest an uploaded PDF, Markdown, TXT, or HTML file |
-| `POST` | `/api/v1/documents/search` * | Embed a query and return the nearest chunks |
-| `POST` | `/api/v1/documents/ask` * | Retrieve context and have the local SLM generate an answer from it |
+| `POST` | `/api/v1/documents/search` * | Hybrid (vector + BM25) search, return the nearest chunks |
+| `POST` | `/api/v1/documents/ask` * | Route, retrieve (hybrid), re-rank, and have the local SLM generate an answer |
 | `GET` | `/docs` | Interactive OpenAPI (Swagger) docs |
 | `GET` | `/redoc` | ReDoc API reference |
 
@@ -247,6 +264,7 @@ make check        # lint + typecheck + test (what CI runs)
 | [0003](docs/adr/0003-api-key-auth-and-rate-limiting.md) | Access control: API keys over OAuth2; in-memory rate limiting over Redis, for now |
 | [0004](docs/adr/0004-langchain-for-answer-generation.md) | Answer generation: LangChain LCEL chain (`langchain-core` + `langchain-ollama`) over hand-rolled prompt assembly |
 | [0005](docs/adr/0005-document-loaders.md) | Document loaders: `pypdf` + `beautifulsoup4` over `langchain-community`'s `unstructured`-based loaders |
+| [0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md) | Hybrid retrieval (hand-rolled BM25 + `langchain_classic`'s `EnsembleRetriever`), LangGraph query routing, SLM-based re-ranking |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
@@ -254,17 +272,18 @@ New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
 Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
 Sprint 3 added access control, Sprint 4 closed the retrieval-augmented
-*generation* half of RAG, and Sprint 5 (this repo) extends ingestion
-beyond raw text. Planned next:
+*generation* half of RAG, Sprint 5 extended ingestion beyond raw text,
+and Sprint 6 (this repo) improves retrieval quality itself. Planned next:
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
 - [x] Answer generation: `POST /documents/ask` — LangChain LCEL chain (retriever + prompt + local SLM)
 - [x] Document loaders (PDF, Markdown, TXT, HTML) for ingestion beyond raw text
-- [ ] Hybrid retrieval, query routing (LangGraph), re-ranking
+- [x] Hybrid retrieval, query routing (LangGraph), re-ranking
+- [ ] Streaming responses (SSE) for `/documents/ask`
+- [ ] A minimal demo UI (Streamlit) beyond Swagger — planned as the last step, after streaming
 - [ ] Observability: request tracing, metrics (Prometheus), dashboards
 - [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
-- [ ] Streaming responses (SSE/WebSocket) for chat-style endpoints
 
 ## Contributing
 

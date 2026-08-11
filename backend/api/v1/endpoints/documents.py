@@ -35,6 +35,7 @@ from backend.services.generation_service import GenerationService
 from backend.services.ingestion_service import IngestionService
 from ingestion.loaders.dispatch import UnsupportedFileTypeError, load_document
 from llm.ollama.client import OllamaClient
+from retrieval.retriever.hybrid import HybridVectorStore, build_hybrid_retriever, with_rrf_scores
 from retrieval.vector_store.port import VectorStore
 
 router = APIRouter(tags=["documents"])
@@ -96,22 +97,22 @@ async def search_documents(
     body: SearchRequest,
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
-    vector_store: VectorStore = Depends(get_vector_store),
+    vector_store: HybridVectorStore = Depends(get_vector_store),
     _: None = Depends(enforce_rate_limit),
 ) -> SearchResponse:
-    query_vector = await ollama.embed(body.query)
     top_k = body.top_k or settings.SEARCH_TOP_K_DEFAULT
-    matches = vector_store.search(query_vector, top_k)
+    retriever = build_hybrid_retriever(vector_store, ollama, top_k)
+    documents = with_rrf_scores(await retriever.ainvoke(body.query))
 
     results = [
         SearchResultItem(
-            chunk_id=match.id,
-            document_id=str(match.metadata.get("document_id", "")),
-            text=match.text,
-            score=match.score,
-            metadata=match.metadata,
+            chunk_id=str(doc.metadata["chunk_id"]),
+            document_id=str(doc.metadata.get("document_id", "")),
+            text=doc.page_content,
+            score=float(doc.metadata["score"]),
+            metadata=doc.metadata,
         )
-        for match in matches
+        for doc in documents
     ]
     return SearchResponse(results=results)
 
@@ -121,7 +122,7 @@ async def ask_documents(
     body: AskRequest,
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
-    vector_store: VectorStore = Depends(get_vector_store),
+    vector_store: HybridVectorStore = Depends(get_vector_store),
     chat_model: BaseChatModel = Depends(get_chat_model),
     _: None = Depends(enforce_rate_limit),
 ) -> AskResponse:

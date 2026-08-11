@@ -84,6 +84,14 @@ class FakeVectorStore:
     def count(self) -> int:
         return len(self._ids)
 
+    def payloads(self) -> list[dict[str, Any]]:
+        return [
+            {"id": id_, "text": text, "metadata": metadata}
+            for id_, text, metadata in zip(
+                self._ids, self._texts, self._metadatas, strict=True
+            )
+        ]
+
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
@@ -246,6 +254,56 @@ def test_ask_with_no_matching_documents_skips_generation() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] != FAKE_ANSWER
+    assert body["sources"] == []
+
+
+def test_search_returns_results_from_hybrid_retrieval(client: TestClient) -> None:
+    client.post(
+        "/api/v1/documents",
+        json={"text": "Kubernetes orchestrates containers.", "metadata": {"source": "k8s"}},
+        headers=AUTH_HEADERS,
+    )
+    client.post(
+        "/api/v1/documents",
+        json={"text": "FastAPI handles HTTP requests.", "metadata": {"source": "fastapi"}},
+        headers=AUTH_HEADERS,
+    )
+
+    response = client.post(
+        "/api/v1/documents/search",
+        json={"query": "Kubernetes containers", "top_k": 5},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert any(r["metadata"].get("source") == "k8s" for r in results)
+
+
+def test_ask_greeting_routes_to_direct_answer() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
+        max_requests=1000, window_seconds=60
+    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
+        responses=["DIRECT", "Hi! How can I help?"]
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/documents/ask",
+            json={"query": "hi there"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Hi! How can I help?"
     assert body["sources"] == []
 
 
