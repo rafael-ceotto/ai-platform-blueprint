@@ -1,13 +1,36 @@
 # See docs/adr/0012-ci-cd-ghcr-publishing.md for the full reasoning.
 #
-# Both findings below come from pip's own vendored copies of these
-# libraries (pip/_vendor/msgpack, pip's internal setuptools bootstrap),
-# not from a package our code actually imports or depends on. Verified
-# directly: `find /opt/venv -iname '*msgpack*'` in the built image shows
-# only pip/_vendor/msgpack -- the package our code actually uses is a
-# different, unrelated library (ormsgpack, unaffected). Not independently
-# upgradable via our Dockerfile; only a newer pip release changes these.
-# Revisit when bumping the base Python image or pip version.
-
+# Group 1: pip's own vendored copies of these libraries
+# (pip/_vendor/msgpack, pip's internal setuptools bootstrap), not a
+# package our code actually imports or depends on. Verified directly:
+# `find /opt/venv -iname '*msgpack*'` in the built image shows only
+# pip/_vendor/msgpack -- the package our code actually uses is a
+# different, unrelated library (ormsgpack, unaffected).
 GHSA-6v7p-g79w-8964
 CVE-2025-47273
+
+# Group 2: the *dormant* ensurepip bootstrap wheel that ships inside
+# every python:3.12-slim image, not the actual installed pip (which our
+# Dockerfiles upgrade via `pip install --upgrade pip` -- confirmed
+# 26.2.1 in the built image). Verified directly: the file Trivy flags
+# is /usr/local/lib/python3.12/ensurepip/_bundled/pip-25.0.1-py3-none-any.whl,
+# a static file baked into the base image, never imported or executed
+# (nothing in this project runs `python -m ensurepip`). The associated
+# "setuptools" finding (no file path, `location: Python`) traces to the
+# same bundled wheel's internal metadata, not an installed package --
+# verified nothing named setuptools exists anywhere in the image
+# (`find / -iname '*setuptools*'` returns empty).
+# First seen 2026-08-12: these didn't appear in an earlier same-day
+# local scan, then showed up in CI and a later local scan minutes
+# apart with no image change in between -- Trivy's vulnerability DB
+# updates continuously, so a scan of an unchanged image can start
+# failing without any code change on our side. Worth knowing, not a
+# bug: revisit whenever the base Python image bumps.
+CVE-2026-1703
+CVE-2026-8643
+CVE-2026-6357
+CVE-2026-3219
+CVE-2025-8869
+CVE-2026-59890
+
+# Revisit all of the above when bumping the base Python image or pip version.
