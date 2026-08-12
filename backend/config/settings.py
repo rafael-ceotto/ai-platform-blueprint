@@ -68,12 +68,14 @@ class Settings(BaseSettings):
     RERANK_TOP_N: int = 3
 
     # --- Observability: tracing (OpenTelemetry -> Jaeger) / metrics (Prometheus) ---
-    # See docs/adr/0008-observability-tracing-metrics-dashboards.md
+    # See docs/adr/0008-observability-tracing-metrics-dashboards.md and
+    # docs/adr/0011-docker-compose-profiles.md.
     # Both default off: instrumenting more than one FastAPI app against the
     # process-global tracer provider / Prometheus registry raises on the
     # second call, and the test suite calls create_app() many times in one
-    # process. docker-compose.yml flips both on for the live stack, where
-    # create_app() runs exactly once.
+    # process. The jaeger/prometheus/grafana containers are also opt-in
+    # (the "observability" Compose profile) -- these two flags are set to
+    # "true" alongside that profile so there's something to export/scrape.
     TRACING_ENABLED: bool = False
     METRICS_ENABLED: bool = False
     OTEL_SERVICE_NAME: str = "konsole-ai-api"

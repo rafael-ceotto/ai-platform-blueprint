@@ -167,9 +167,11 @@ C4Component
   SSE Formatter instead of returning a single JSON body (ADR-0007).
   Tracing Setup and Metrics Setup are wired into the App Factory at
   startup, both disabled by default (`Settings.TRACING_ENABLED` /
-  `Settings.METRICS_ENABLED`) and enabled only in `docker-compose.yml`,
-  where Jaeger, Prometheus, and Grafana run as sibling containers
-  (ADR-0008).
+  `Settings.METRICS_ENABLED`) and enabled only when running with the
+  `docker-compose.yml` "observability" Compose profile, where Jaeger,
+  Prometheus, and Grafana run as sibling containers (ADR-0008,
+  ADR-0011). Without that profile, `docker compose up` starts only
+  `api`/`ollama`/`ui`.
 - The Demo UI (Container level only -- it's two files, `ui/app.py` +
   `ui/api_client.py`, deliberately not broken out into its own
   Component diagram) is a separate deployable with its own image and

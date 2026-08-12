@@ -36,10 +36,18 @@ question, and watch the answer stream in with cited sources.
     -d '{"query": "What does this API do?"}'
   ```
 
-**Also included**, live the moment the stack is up: distributed tracing
-at http://localhost:16686 (Jaeger), metrics at http://localhost:9090
-(Prometheus), and a dashboard at http://localhost:3000 (Grafana). No
-Docker? `make run` (API) and `make ui` (demo UI) work with a local
+**Want the observability stack too** (distributed tracing, metrics,
+dashboards)? It's opt-in, so the default stack stays lean:
+
+```bash
+TRACING_ENABLED=true METRICS_ENABLED=true docker compose --profile observability up -d --build
+```
+
+Then: Jaeger at http://localhost:16686, Prometheus at
+http://localhost:9090, Grafana (with a provisioned dashboard) at
+http://localhost:3000.
+
+No Docker? `make run` (API) and `make ui` (demo UI) work with a local
 Python install too.
 
 ## What it does
