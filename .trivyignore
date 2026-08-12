@@ -1,0 +1,13 @@
+# See docs/adr/0012-ci-cd-ghcr-publishing.md for the full reasoning.
+#
+# Both findings below come from pip's own vendored copies of these
+# libraries (pip/_vendor/msgpack, pip's internal setuptools bootstrap),
+# not from a package our code actually imports or depends on. Verified
+# directly: `find /opt/venv -iname '*msgpack*'` in the built image shows
+# only pip/_vendor/msgpack -- the package our code actually uses is a
+# different, unrelated library (ormsgpack, unaffected). Not independently
+# upgradable via our Dockerfile; only a newer pip release changes these.
+# Revisit when bumping the base Python image or pip version.
+
+GHSA-6v7p-g79w-8964
+CVE-2025-47273
