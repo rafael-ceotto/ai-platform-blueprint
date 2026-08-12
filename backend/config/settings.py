@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # --- General ---
-    APP_NAME: str = "AI Platform Blueprint"
+    APP_NAME: str = "Konsole.ai"
     ENVIRONMENT: Literal["local", "development", "staging", "production"] = "local"
     DEBUG: bool = False
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # create_app() runs exactly once.
     TRACING_ENABLED: bool = False
     METRICS_ENABLED: bool = False
-    OTEL_SERVICE_NAME: str = "ai-platform-blueprint-api"
+    OTEL_SERVICE_NAME: str = "konsole-ai-api"
     OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4317"
 
     @property

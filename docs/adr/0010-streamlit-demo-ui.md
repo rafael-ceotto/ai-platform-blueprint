@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-08-12 |
-| **Deciders** | AI Platform Blueprint team |
+| **Deciders** | Konsole.ai team |
 | **Related** | [ADR-0007: SSE Streaming](0007-sse-streaming.md), [ADR-0008: Observability](0008-observability-tracing-metrics-dashboards.md) |
 
 ## Context

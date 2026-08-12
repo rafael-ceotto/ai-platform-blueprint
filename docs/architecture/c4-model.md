@@ -1,4 +1,4 @@
-# C4 Model — AI Platform Blueprint
+# C4 Model — Konsole.ai
 
 Architecture overview using the [C4 model](https://c4model.com/)
 (Context → Container → Component), rendered in Mermaid.
@@ -9,12 +9,12 @@ Who uses the platform, and what external systems does it talk to.
 
 ```mermaid
 C4Context
-    title System Context — AI Platform Blueprint
+    title System Context — Konsole.ai
 
     Person(user, "End User", "Interacts with the platform via a client app or API consumer")
     Person(developer, "Developer", "Integrates against the platform's API")
 
-    System(platform, "AI Platform Blueprint", "FastAPI service exposing RAG / LLM capabilities over HTTP")
+    System(platform, "Konsole.ai", "FastAPI service exposing RAG / LLM capabilities over HTTP")
 
     System_Ext(ollama, "Ollama Runtime", "Local LLM inference daemon (generation + embeddings)")
     System_Ext(externalLLM, "External LLM Provider", "Optional hosted model API for higher-quality inference (future, see ADR-0002)")
@@ -36,11 +36,11 @@ The deployable units that make up the system and how they communicate.
 
 ```mermaid
 C4Container
-    title Container Diagram — AI Platform Blueprint
+    title Container Diagram — Konsole.ai
 
     Person(user, "End User")
 
-    System_Boundary(platform, "AI Platform Blueprint") {
+    System_Boundary(platform, "Konsole.ai") {
         Container(api, "API Service", "FastAPI / Python 3.12", "Exposes REST endpoints, orchestrates retrieval + generation, owns request validation and auth")
         Container(ui, "Demo UI", "Streamlit / Python 3.12", "Ask (streamed), search, and ingest -- a thin client over the API, beyond Swagger (see ADR-0010)")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Stores document embeddings, serves nearest-neighbor search (see ADR-0001)")

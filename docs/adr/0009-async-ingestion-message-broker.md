@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-08-12 |
-| **Deciders** | AI Platform Blueprint team |
+| **Deciders** | Konsole.ai team |
 | **Related** | [ADR-0002: LLM Runtime](0002-llm-runtime-ollama-vs-external-apis.md) |
 
 ## Context

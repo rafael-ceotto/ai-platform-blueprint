@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ai-platform-blueprint"
+name = "konsole-ai"
 version = "0.1.0"
-description = "Production-grade blueprint for building AI/LLM platforms — FastAPI, local-first LLM runtime (Ollama), and vector search, designed to scale from prototype to production."
+description = "Konsole.ai — a local-first AI/LLM platform: FastAPI, Ollama, and vector search, designed to scale from prototype to production."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Rafael Ceotto" }]
-keywords = ["ai", "llm", "fastapi", "rag", "ollama", "vector-search", "platform-blueprint"]
+keywords = ["ai", "llm", "fastapi", "rag", "ollama", "vector-search", "konsole-ai"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

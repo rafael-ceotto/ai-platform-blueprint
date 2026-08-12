@@ -1,4 +1,4 @@
-# AI Platform Blueprint
+# Konsole.ai
 
 > A production-grade starting point for building AI/LLM platforms: FastAPI
 > service, local-first LLM runtime (Ollama), and a vector-search layer
@@ -16,7 +16,7 @@ No API keys, no billing, no sign-up — everything runs on your machine.
 **🖱️ Just want to click around?** (need [Docker Desktop](https://www.docker.com/products/docker-desktop/))
 
 ```bash
-git clone <this-repo-url> && cd ai-platform-blueprint
+git clone <this-repo-url> && cd konsole-ai
 cp .env.example .env
 docker compose up -d --build
 
@@ -44,7 +44,7 @@ needed after this.
 
 ## Overview
 
-AI Platform Blueprint is a reference architecture — not a toy demo — for
+Konsole.ai is a reference architecture — not a toy demo — for
 teams building products on top of LLMs. It ships with the plumbing most AI
 products need on day one:
 
@@ -109,11 +109,11 @@ UI showing off everything above beyond Swagger.
 
 ```mermaid
 C4Container
-    title Container Diagram — AI Platform Blueprint
+    title Container Diagram — Konsole.ai
 
     Person(user, "End User")
 
-    System_Boundary(platform, "AI Platform Blueprint") {
+    System_Boundary(platform, "Konsole.ai") {
         Container(api, "API Service", "FastAPI / Python 3.12", "REST endpoints, orchestration, validation")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Embedding storage + similarity search")
         ContainerDb(datavol, "Data Volume", "Docker volume", "Persists index files")
@@ -155,7 +155,7 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 ## Project Structure
 
 ```
-ai-platform-blueprint/
+konsole-ai/
 ├── backend/                  # HTTP surface + orchestration
 │   ├── main.py                 # FastAPI app factory + lifespan
 │   ├── config/                  # Typed settings (env-driven)
@@ -207,7 +207,7 @@ Runs the API and Ollama together; no local Python setup needed.
 
 ```bash
 git clone <this-repo-url>
-cd ai-platform-blueprint
+cd konsole-ai
 cp .env.example .env
 
 docker compose up -d --build
@@ -273,7 +273,7 @@ Observability, all live automatically alongside the API:
 |---|---|---|
 | Jaeger | http://localhost:16686 | Traces spanning each request and its calls to Ollama, after you've hit a few endpoints |
 | Prometheus | http://localhost:9090/targets | The `api` scrape target reporting `UP` |
-| Grafana | http://localhost:3000 | A provisioned "AI Platform Blueprint - API Overview" dashboard (anonymous viewer access, no login needed) |
+| Grafana | http://localhost:3000 | A provisioned "Konsole.ai - API Overview" dashboard (anonymous viewer access, no login needed) |
 
 ### Option B — Local Python
 

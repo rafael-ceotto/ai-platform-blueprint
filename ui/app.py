@@ -1,4 +1,4 @@
-"""Minimal demo UI for AI Platform Blueprint, beyond Swagger.
+"""Minimal demo UI for Konsole.ai, beyond Swagger.
 
 Talks to the API over HTTP only (see api_client.py) -- never imports
 backend code directly. See docs/adr/0010-streamlit-demo-ui.md.
@@ -10,7 +10,7 @@ from typing import Any
 import api_client
 import streamlit as st
 
-st.set_page_config(page_title="AI Platform Blueprint", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Konsole.ai", page_icon="🤖", layout="wide")
 
 st.sidebar.header("Connection")
 base_url = st.sidebar.text_input(
@@ -20,7 +20,7 @@ api_key = st.sidebar.text_input(
     "API key", value=os.environ.get("API_KEY", "dev-local-key"), type="password"
 )
 
-st.title("AI Platform Blueprint")
+st.title("Konsole.ai")
 st.caption("A minimal demo UI over the RAG API -- ask, search, and ingest, beyond Swagger.")
 
 ask_tab, search_tab, ingest_tab = st.tabs(["💬 Ask", "🔍 Search", "📄 Ingest"])

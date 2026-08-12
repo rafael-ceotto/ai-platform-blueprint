@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-08-08 |
-| **Deciders** | AI Platform Blueprint team |
+| **Deciders** | Konsole.ai team |
 | **Related** | [ADR-0004: LangChain for Answer Generation](0004-langchain-for-answer-generation.md) |
 
 ## Context

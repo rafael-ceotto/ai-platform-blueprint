@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted |
 | **Date** | 2026-08-08 |
-| **Deciders** | AI Platform Blueprint team |
+| **Deciders** | Konsole.ai team |
 | **Related** | [ADR-0001: Vector Store](0001-vector-store-faiss-vs-qdrant.md) |
 
 ## Context

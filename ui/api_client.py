@@ -1,4 +1,4 @@
-"""Thin HTTP client for the AI Platform Blueprint API, used by ui/app.py.
+"""Thin HTTP client for the Konsole.ai API, used by ui/app.py.
 
 Kept separate from app.py so the request/response handling can be
 mocked in tests without a live API. See docs/adr/0010-streamlit-demo-ui.md.
