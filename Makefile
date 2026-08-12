@@ -1,7 +1,7 @@
 .PHONY: install run ui test lint format typecheck check docker-build docker-up docker-down docker-logs clean
 
 install:
-	pip install -e ".[dev]"
+	pip install -e ".[dev,ui]"
 
 run:
 	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
