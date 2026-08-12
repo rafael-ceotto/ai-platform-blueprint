@@ -41,6 +41,10 @@ products need on day one:
   outgoing calls to Ollama) exported to Jaeger, Prometheus metrics, and
   a provisioned Grafana dashboard — all live with `docker compose up`
   (see [ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)).
+- **A minimal demo UI** (Streamlit): ask questions with streamed
+  answers and cited sources, run hybrid search, and ingest documents —
+  all beyond Swagger, zero-config against the default stack
+  (see [ADR-0010](docs/adr/0010-streamlit-demo-ui.md)).
 - **Architecture decision records (ADRs)** documenting the *why* behind
   every non-obvious choice, and a **C4 model** describing the system at
   three levels of zoom.
@@ -63,9 +67,10 @@ LangGraph router that skips retrieval for queries that don't need it,
 and re-ranks retrieved candidates via the local SLM before generating
 an answer. **Sprint 7 — Streaming** added token-by-token SSE streaming
 to `/documents/ask`, reusing the same query graph. **Sprint 8 —
-Observability** (this repo) added distributed tracing (OpenTelemetry ->
-Jaeger), metrics (Prometheus), and a provisioned Grafana dashboard. The
-last planned step is a minimal demo UI.
+Observability** added distributed tracing (OpenTelemetry -> Jaeger),
+metrics (Prometheus), and a provisioned Grafana dashboard. **Sprint 9 —
+Demo UI** (this repo), the last planned step, added a minimal Streamlit
+UI showing off everything above beyond Swagger.
 
 ## Architecture
 
@@ -106,6 +111,7 @@ Full C4 breakdown (Context → Container → Component): [`docs/architecture/c4-
 | Streaming | Server-Sent Events (FastAPI `StreamingResponse`) | Token-by-token `/ask` responses, no new dependency ([ADR-0007](docs/adr/0007-sse-streaming.md)) |
 | Tracing | OpenTelemetry -> Jaeger v2 | FastAPI + httpx auto-instrumentation, OTLP export, log/trace correlation ([ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)) |
 | Metrics & dashboards | `prometheus-fastapi-instrumentator` + Prometheus + Grafana | Default RED metrics, provisioned dashboard, zero click-ops setup ([ADR-0008](docs/adr/0008-observability-tracing-metrics-dashboards.md)) |
+| Demo UI | Streamlit + `httpx2` | Thin client over the API; `httpx2`'s native SSE support consumes `/ask` streaming directly ([ADR-0010](docs/adr/0010-streamlit-demo-ui.md)) |
 | Packaging | `pyproject.toml` (Hatchling) | Standard, PEP 621-compliant |
 | Lint / format | Ruff | Single fast tool for both |
 | Type checking | mypy (strict) | Catch contract errors before runtime |
@@ -144,13 +150,18 @@ ai-platform-blueprint/
 ├── infra/                     # Local observability infra config
 │   ├── prometheus/               # Scrape config
 │   └── grafana/                  # Provisioned datasource + dashboard
+├── ui/                        # Streamlit demo UI (separate deployable)
+│   ├── app.py                   # Sidebar + Ask/Search/Ingest tabs
+│   ├── api_client.py             # All HTTP calls against the API (httpx2)
+│   ├── requirements.txt          # streamlit, httpx2 -- own deps, own image
+│   └── Dockerfile
 ├── tests/                     # pytest suite
 ├── docs/
 │   ├── adr/                    # Architecture Decision Records
 │   └── architecture/           # C4 model diagrams (Mermaid)
 ├── .github/workflows/ci.yml   # Lint + typecheck + test + build
 ├── Dockerfile                  # Multi-stage, non-root, healthchecked
-├── docker-compose.yml          # api + ollama + jaeger + prometheus + grafana
+├── docker-compose.yml          # api + ollama + jaeger + prometheus + grafana + ui
 ├── pyproject.toml              # Deps, tooling config
 └── Makefile                    # Common dev commands
 ```
@@ -219,6 +230,10 @@ curl -N -X POST http://localhost:8000/api/v1/documents/ask \
 
 API docs (Swagger UI): http://localhost:8000/docs
 
+**Demo UI** (beyond Swagger): http://localhost:8501 — ask questions
+with streamed answers and cited sources, run hybrid search, and ingest
+documents, all zero-config against the default stack.
+
 Observability, all live automatically alongside the API:
 
 | UI | URL | What you'll see |
@@ -238,6 +253,10 @@ cp .env.example .env
 
 # Run Ollama separately (native install or `docker run -p 11434:11434 ollama/ollama`)
 make run   # or: uvicorn backend.main:app --reload
+
+# In a separate shell, the demo UI (talks to the API over HTTP only,
+# its own dependencies -- see ui/requirements.txt)
+make ui    # or: cd ui && pip install -r requirements.txt && streamlit run app.py
 ```
 
 ## Configuration
@@ -304,6 +323,8 @@ make check        # lint + typecheck + test (what CI runs)
 | [0006](docs/adr/0006-hybrid-retrieval-and-query-routing.md) | Hybrid retrieval (hand-rolled BM25 + `langchain_classic`'s `EnsembleRetriever`), LangGraph query routing, SLM-based re-ranking |
 | [0007](docs/adr/0007-sse-streaming.md) | Streaming answers: Server-Sent Events over WebSocket, `stream` request field over a separate endpoint, same query graph reused via `.astream()` |
 | [0008](docs/adr/0008-observability-tracing-metrics-dashboards.md) | Observability: OpenTelemetry (FastAPI + httpx) exported to Jaeger v2 over OTLP; `prometheus-fastapi-instrumentator` + Prometheus + a provisioned Grafana dashboard |
+| [0009](docs/adr/0009-async-ingestion-message-broker.md) | Async ingestion / message broker (Kafka or similar): not needed yet — ingestion stays synchronous until a concrete decoupling/fan-out need exists |
+| [0010](docs/adr/0010-streamlit-demo-ui.md) | Demo UI: Streamlit as a separate deployable (own deps/image) over reusing the API's environment; `httpx2` for native SSE consumption |
 
 New ADRs follow [`docs/adr/template.md`](docs/adr/template.md).
 
@@ -313,7 +334,8 @@ Sprint 1 established the foundation, Sprint 2 added the RAG pipeline,
 Sprint 3 added access control, Sprint 4 closed the retrieval-augmented
 *generation* half of RAG, Sprint 5 extended ingestion beyond raw text,
 Sprint 6 improved retrieval quality itself, Sprint 7 added streaming,
-and Sprint 8 (this repo) added observability. Planned next:
+Sprint 8 added observability, and Sprint 9 (this repo) added the demo
+UI — the last item in the original roadmap.
 
 - [x] RAG pipeline: document ingestion, chunking, embedding, `VectorStore` port + FAISS adapter
 - [x] Auth (API keys / OAuth2) and rate limiting
@@ -322,8 +344,12 @@ and Sprint 8 (this repo) added observability. Planned next:
 - [x] Hybrid retrieval, query routing (LangGraph), re-ranking
 - [x] Streaming responses (SSE) for `/documents/ask`
 - [x] Observability: request tracing (OpenTelemetry -> Jaeger), metrics (Prometheus), dashboards (Grafana)
-- [ ] A minimal demo UI (Streamlit) beyond Swagger — planned as the last step
-- [ ] External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers)
+- [x] A minimal demo UI (Streamlit) beyond Swagger
+
+Not planned, evaluated and explicitly deferred:
+
+- External LLM provider adapter (see [ADR-0002](docs/adr/0002-llm-runtime-ollama-vs-external-apis.md) revisit triggers) — no concrete need yet for quality beyond local open-weight models.
+- Async ingestion / message broker (see [ADR-0009](docs/adr/0009-async-ingestion-message-broker.md)) — no concrete need yet for decoupled/fan-out processing.
 
 ## Contributing
 

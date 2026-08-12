@@ -42,6 +42,7 @@ C4Container
 
     System_Boundary(platform, "AI Platform Blueprint") {
         Container(api, "API Service", "FastAPI / Python 3.12", "Exposes REST endpoints, orchestrates retrieval + generation, owns request validation and auth")
+        Container(ui, "Demo UI", "Streamlit / Python 3.12", "Ask (streamed), search, and ingest -- a thin client over the API, beyond Swagger (see ADR-0010)")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Stores document embeddings, serves nearest-neighbor search (see ADR-0001)")
         ContainerDb(datavol, "Data Volume", "Docker volume", "Persists FAISS index files and other local artifacts")
     }
@@ -52,6 +53,8 @@ C4Container
     Container_Ext(grafana, "Grafana", "Container / grafana/grafana", "Provisioned Prometheus datasource + starter dashboard (see ADR-0008)")
 
     Rel(user, api, "HTTPS requests", "JSON/REST")
+    Rel(user, ui, "Browses to", "HTTP")
+    Rel(ui, api, "Ingest / search / ask (incl. streamed)", "HTTP/REST + SSE")
     Rel(api, vectorstore, "Similarity search / upsert", "in-process call")
     Rel(vectorstore, datavol, "Reads/writes index", "filesystem")
     Rel(api, ollama, "Generate / embed", "HTTP :11434")
@@ -146,7 +149,7 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 8: the `VectorStore`
+- The Component diagram reflects the state after Sprint 9: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through `/documents` (tracked alongside ADR-0001), all four document
   endpoints require a valid API key and are subject to a per-key rate
@@ -167,5 +170,10 @@ C4Component
   `Settings.METRICS_ENABLED`) and enabled only in `docker-compose.yml`,
   where Jaeger, Prometheus, and Grafana run as sibling containers
   (ADR-0008).
+- The Demo UI (Container level only -- it's two files, `ui/app.py` +
+  `ui/api_client.py`, deliberately not broken out into its own
+  Component diagram) is a separate deployable with its own image and
+  dependencies, talking to the API purely over HTTP -- it never imports
+  backend code (ADR-0010).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

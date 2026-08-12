@@ -109,6 +109,24 @@ services:
     networks:
       - platform
 
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: ai-platform-blueprint-ui:local
+    container_name: ai-platform-ui
+    restart: unless-stopped
+    environment:
+      API_BASE_URL: http://api:8000
+      API_KEY: dev-local-key
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - platform
+
 networks:
   platform:
     driver: bridge

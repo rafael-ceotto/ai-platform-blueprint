@@ -1,10 +1,13 @@
-.PHONY: install run test lint format typecheck check docker-build docker-up docker-down docker-logs clean
+.PHONY: install run ui test lint format typecheck check docker-build docker-up docker-down docker-logs clean
 
 install:
 	pip install -e ".[dev]"
 
 run:
 	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+ui:
+	cd ui && pip install -r requirements.txt && streamlit run app.py
 
 test:
 	pytest
