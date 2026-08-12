@@ -6,14 +6,23 @@
 - `POST /documents/search` -> embed a query and return the nearest chunks.
 - `POST /documents/ask`    -> retrieve context and have the SLM generate
   an answer from it (see docs/adr/0004-langchain-for-answer-generation.md).
-  Set `"stream": true` to get the answer as Server-Sent Events instead
-  of a single JSON response (see docs/adr/0007-sse-streaming.md).
+
+Both ingest endpoints and `/documents/ask` accept `"stream": true` (a
+form field for `/documents/upload`) to get step-by-step progress / the
+answer as Server-Sent Events instead of a single JSON response (see
+docs/adr/0007-sse-streaming.md and
+docs/adr/0013-etl-progress-and-queryable-ingestion-log.md). Every
+completed ingestion is also logged to a separate, searchable index --
+ask about it via `/documents/ask` (e.g. "what happened when I uploaded
+doc <id>").
 
 All four require a valid `X-API-Key` header and are subject to a
 per-key rate limit; see docs/adr/0003-api-key-auth-and-rate-limiting.md.
 """
 
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -22,6 +31,7 @@ from langchain_core.language_models import BaseChatModel
 from backend.api.deps import (
     enforce_rate_limit,
     get_chat_model,
+    get_log_vector_store,
     get_ollama_client,
     get_vector_store,
 )
@@ -51,24 +61,32 @@ async def ingest_document(
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
     vector_store: VectorStore = Depends(get_vector_store),
+    log_vector_store: VectorStore = Depends(get_log_vector_store),
     _: None = Depends(enforce_rate_limit),
-) -> IngestResponse:
-    ingestion = IngestionService(settings, ollama, vector_store)
+) -> IngestResponse | StreamingResponse:
+    ingestion = IngestionService(settings, ollama, vector_store, log_vector_store)
+
+    if body.stream:
+        return StreamingResponse(
+            sse_event_stream(ingestion.ingest_document_stream(body.text, body.metadata)),
+            media_type="text/event-stream",
+        )
+
     result = await ingestion.ingest_document(body.text, body.metadata)
     return IngestResponse(document_id=result.document_id, chunk_count=result.chunk_count)
 
 
-@router.post(
-    "/documents/upload", response_model=IngestResponse, summary="Upload a document file"
-)
+@router.post("/documents/upload", response_model=IngestResponse, summary="Upload a document file")
 async def upload_document(
     file: UploadFile = File(...),
     metadata: str = Form(default="{}"),
+    stream: bool = Form(default=False),
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
     vector_store: VectorStore = Depends(get_vector_store),
+    log_vector_store: VectorStore = Depends(get_log_vector_store),
     _: None = Depends(enforce_rate_limit),
-) -> IngestResponse:
+) -> IngestResponse | StreamingResponse:
     try:
         parsed_metadata = json.loads(metadata)
     except json.JSONDecodeError as exc:
@@ -84,15 +102,35 @@ async def upload_document(
             detail=f"File exceeds the {settings.MAX_UPLOAD_SIZE_BYTES} byte upload limit",
         )
 
+    filename = file.filename or ""
+    ingestion = IngestionService(settings, ollama, vector_store, log_vector_store)
+
+    if stream:
+
+        async def _stream() -> AsyncIterator[dict[str, Any]]:
+            yield {"type": "step", "step": "loading"}
+            try:
+                text = load_document(filename, content)
+            except UnsupportedFileTypeError as exc:
+                yield {"type": "error", "detail": str(exc)}
+                return
+            async for event in ingestion.ingest_document_stream(
+                text, parsed_metadata, source_type="upload", filename=filename
+            ):
+                yield event
+
+        return StreamingResponse(sse_event_stream(_stream()), media_type="text/event-stream")
+
     try:
-        text = load_document(file.filename or "", content)
+        text = load_document(filename, content)
     except UnsupportedFileTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
 
-    ingestion = IngestionService(settings, ollama, vector_store)
-    result = await ingestion.ingest_document(text, parsed_metadata)
+    result = await ingestion.ingest_document(
+        text, parsed_metadata, source_type="upload", filename=filename
+    )
     return IngestResponse(document_id=result.document_id, chunk_count=result.chunk_count)
 
 
@@ -127,10 +165,11 @@ async def ask_documents(
     settings: Settings = Depends(get_settings),
     ollama: OllamaClient = Depends(get_ollama_client),
     vector_store: HybridVectorStore = Depends(get_vector_store),
+    log_vector_store: HybridVectorStore = Depends(get_log_vector_store),
     chat_model: BaseChatModel = Depends(get_chat_model),
     _: None = Depends(enforce_rate_limit),
 ) -> AskResponse | StreamingResponse:
-    generation = GenerationService(settings, ollama, vector_store, chat_model)
+    generation = GenerationService(settings, ollama, vector_store, log_vector_store, chat_model)
 
     if body.stream:
         return StreamingResponse(

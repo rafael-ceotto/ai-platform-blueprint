@@ -62,6 +62,7 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 
@@ -81,6 +82,7 @@ async def test_ask_with_no_retrieved_documents_skips_the_llm() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 
@@ -98,6 +100,7 @@ async def test_ask_routes_greeting_to_direct_answer_without_retrieval() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["DIRECT", "Hello! How can I help?"]),
     )
 
@@ -119,6 +122,7 @@ async def test_ask_reranks_multiple_candidates_before_generating() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", "2,1", FAKE_ANSWER]),
     )
 
@@ -142,6 +146,7 @@ async def test_ask_stream_yields_tokens_only_from_generate_node() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 
@@ -166,6 +171,7 @@ async def test_ask_stream_direct_answer_path_streams_tokens_too() -> None:
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["DIRECT", "Hi there!"]),
     )
 
@@ -185,6 +191,7 @@ async def test_ask_stream_with_no_documents_has_no_tokens_but_final_answer() -> 
         _settings(),
         FakeOllamaClient(),
         store,
+        FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
     )
 

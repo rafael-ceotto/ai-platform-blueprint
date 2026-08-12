@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    logger.info(
-        "Starting %s in %s environment", settings.APP_NAME, settings.ENVIRONMENT
-    )
+    logger.info("Starting %s in %s environment", settings.APP_NAME, settings.ENVIRONMENT)
     yield
     logger.info("Shutting down %s", settings.APP_NAME)
 

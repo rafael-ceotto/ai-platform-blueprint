@@ -44,6 +44,7 @@ C4Container
         Container(api, "API Service", "FastAPI / Python 3.12", "Exposes REST endpoints, orchestrates retrieval + generation, owns request validation and auth")
         Container(ui, "Demo UI", "Streamlit / Python 3.12", "Ask (streamed), search, and ingest -- a thin client over the API, beyond Swagger (see ADR-0010)")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Stores document embeddings, serves nearest-neighbor search (see ADR-0001)")
+        Container(logstore, "Ingestion Log Store", "FAISS (in-process)", "A second, independent FAISS index of ingestion-run records, searchable the same way as content (see ADR-0013)")
         ContainerDb(datavol, "Data Volume", "Docker volume", "Persists FAISS index files and other local artifacts")
     }
 
@@ -56,7 +57,9 @@ C4Container
     Rel(user, ui, "Browses to", "HTTP")
     Rel(ui, api, "Ingest / search / ask (incl. streamed)", "HTTP/REST + SSE")
     Rel(api, vectorstore, "Similarity search / upsert", "in-process call")
+    Rel(api, logstore, "Logs each ingestion / searches ingestion history", "in-process call")
     Rel(vectorstore, datavol, "Reads/writes index", "filesystem")
+    Rel(logstore, datavol, "Reads/writes index", "filesystem")
     Rel(api, ollama, "Generate / embed", "HTTP :11434")
     Rel(api, jaeger, "Exports request + outbound-HTTP spans", "OTLP/gRPC :4317")
     Rel(prometheus, api, "Scrapes", "HTTP GET /metrics")
@@ -81,10 +84,10 @@ C4Component
         Component(config, "Settings", "backend/config/settings.py", "Typed configuration loaded from env / .env")
         Component(security, "API Key Auth", "backend/api/security.py", "Verifies the X-API-Key header against configured keys")
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
-        Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document")
+        Component(ingestion, "Ingestion Service", "backend/services/ingestion_service.py", "Orchestrates chunk -> embed -> store for a document; ingest_document_stream() reports step-by-step progress and logs every run (see ADR-0013)")
         Component(loaders, "Document Loaders", "ingestion/loaders/dispatch.py", "Extracts text from PDF/HTML/TXT/Markdown by extension (see ADR-0005)")
         Component(generation, "Generation Service", "backend/services/generation_service.py", "Thin wrapper: builds the query graph once, invokes it per request; ask() blocks for the full answer, ask_stream() drives the same graph via astream() (see ADR-0007)")
-        Component(queryGraph, "Query Graph", "llm/routing/query_graph.py", "LangGraph StateGraph: classify -> direct-answer, or hybrid-retrieve -> rerank -> generate (see ADR-0006)")
+        Component(queryGraph, "Query Graph", "llm/routing/query_graph.py", "LangGraph StateGraph: classify -> direct-answer, hybrid-retrieve -> rerank -> generate, or log-retrieve -> log-generate (see ADR-0006, ADR-0013)")
         Component(sse, "SSE Formatter", "backend/api/sse.py", "Formats an async event stream as Server-Sent Events; turns mid-stream exceptions into a final error event (see ADR-0007)")
         Component(chunking, "Chunking", "ingestion/chunking/chunker.py", "Splits document text into overlapping chunks")
         Component(vectorPort, "VectorStore Port", "retrieval/vector_store/port.py", "Protocol abstraction over the vector backend")
@@ -92,7 +95,7 @@ C4Component
         Component(vectorRetriever, "Vector Retriever", "retrieval/retriever/langchain_retriever.py", "BaseRetriever wrapping VectorStore + embedding (see ADR-0004)")
         Component(bm25Retriever, "BM25 Retriever", "retrieval/retriever/bm25_retriever.py", "BaseRetriever rebuilding a rank_bm25 index from FAISS payloads each call (see ADR-0006)")
         Component(hybridRetriever, "Hybrid Retriever", "retrieval/retriever/hybrid.py", "Fuses vector + BM25 via langchain_classic's EnsembleRetriever (RRF); recomputes rank-based scores")
-        Component(ragPrompt, "Prompts", "llm/prompts/*.py", "RAG / classify / rerank / direct-answer ChatPromptTemplates")
+        Component(ragPrompt, "Prompts", "llm/prompts/*.py", "RAG / classify / rerank / direct-answer / log-answer ChatPromptTemplates")
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
         Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
         Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging; adds trace_id/span_id when a span is active (see ADR-0008)")
@@ -126,9 +129,11 @@ C4Component
     Rel(ingestion, ollamaClient, "embeds chunks via")
     Rel(ingestion, vectorPort, "stores vectors via")
     Rel(vectorPort, faissStore, "implemented by")
+    Rel(ingestion, faissStore, "logs each run to a second instance of")
     Rel(generation, queryGraph, "builds once, invokes per request")
     Rel(queryGraph, hybridRetriever, "retrieves context via (hybrid_retrieve node)")
-    Rel(queryGraph, ragPrompt, "formats classify/rerank/generate prompts via")
+    Rel(queryGraph, faissStore, "log_retrieve queries a second instance of")
+    Rel(queryGraph, ragPrompt, "formats classify/rerank/generate/log-answer prompts via")
     Rel(queryGraph, chatModel, "classifies, reranks, and generates via")
     Rel(hybridRetriever, vectorRetriever, "fuses (RRF)")
     Rel(hybridRetriever, bm25Retriever, "fuses (RRF)")
@@ -149,7 +154,7 @@ C4Component
 
 - Diagrams use Mermaid's native `C4Context` / `C4Container` / `C4Component`
   syntax and render directly on GitHub and in most Markdown previewers.
-- The Component diagram reflects the state after Sprint 9: the `VectorStore`
+- The Component diagram reflects the state after this ADR-0013 sprint: the `VectorStore`
   port has a FAISS adapter, the ingestion/chunking pipeline feeds it
   through `/documents` (tracked alongside ADR-0001), all four document
   endpoints require a valid API key and are subject to a per-key rate
@@ -177,5 +182,11 @@ C4Component
   Component diagram) is a separate deployable with its own image and
   dependencies, talking to the API purely over HTTP -- it never imports
   backend code (ADR-0010).
+- The Ingestion Log Store (Container level) and the second `faissStore`
+  instance it maps to (Component level) are the *same* `FaissVectorStore`
+  class as the content Vector Store -- a second instance at a different
+  path (`Settings.LOG_VECTOR_STORE_PATH`), not new code. Kept as a
+  fully separate index from content on purpose, so a content question
+  never surfaces an ingestion-log fragment (ADR-0013).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

@@ -28,6 +28,10 @@ ask_tab, search_tab, ingest_tab = st.tabs(["💬 Ask", "🔍 Search", "📄 Inge
 
 with ask_tab:
     st.subheader("Ask a question")
+    st.caption(
+        "Works for document content, or ask about ingestion history "
+        '(e.g. "what happened when I uploaded document <id>").'
+    )
     query = st.text_input("Question", key="ask_query")
     top_k = st.number_input("top_k", min_value=1, max_value=50, value=5, key="ask_top_k")
 
@@ -89,19 +93,47 @@ with search_tab:
 
 with ingest_tab:
     st.subheader("Ingest a document")
+    st.caption("Every run is logged -- ask about it later in the Ask tab.")
     mode = st.radio("Source", ["Raw text", "File upload"], key="ingest_mode")
+
+    _STEP_LABELS = {
+        "loading": "Loading file",
+        "chunking": "Chunking text",
+        "embedding": "Embedding chunks",
+        "storing": "Storing in the vector index",
+    }
+
+    def _run_ingest(events: Any) -> None:
+        result: dict[str, Any] = {}
+        with st.status("Starting ingestion...", expanded=True) as status:
+            try:
+                for event in events:
+                    if event.type == "step":
+                        label = _STEP_LABELS.get(event.step, event.step)
+                        status.update(label=label)
+                        st.write(f"✅ {label}")
+                    elif event.type == "done":
+                        result["document_id"] = event.document_id
+                        result["chunk_count"] = event.chunk_count
+                        status.update(label="Ingestion complete", state="complete", expanded=False)
+                    elif event.type == "error":
+                        result["error"] = event.detail
+                        status.update(label="Ingestion failed", state="error")
+            except api_client.ApiError as exc:
+                result["error"] = str(exc)
+                status.update(label="Ingestion failed", state="error")
+
+        if result.get("error"):
+            st.error(result["error"])
+        elif result.get("document_id"):
+            st.success(
+                f"Ingested document {result['document_id']} ({result['chunk_count']} chunk(s))"
+            )
 
     if mode == "Raw text":
         text = st.text_area("Text", key="ingest_text")
         if st.button("Ingest", key="ingest_button") and text:
-            try:
-                result = api_client.ingest_text(base_url, api_key, text, {})
-            except api_client.ApiError as exc:
-                st.error(f"Request failed: {exc}")
-            else:
-                st.success(
-                    f"Ingested document {result['document_id']} ({result['chunk_count']} chunk(s))"
-                )
+            _run_ingest(api_client.ingest_text_stream(base_url, api_key, text, {}))
     else:
         uploaded = st.file_uploader(
             "File (PDF, Markdown, TXT, or HTML)",
@@ -109,13 +141,8 @@ with ingest_tab:
             key="ingest_file",
         )
         if uploaded is not None and st.button("Upload", key="upload_button"):
-            try:
-                result = api_client.upload_file(
+            _run_ingest(
+                api_client.upload_file_stream(
                     base_url, api_key, uploaded.name, uploaded.getvalue(), {}
                 )
-            except api_client.ApiError as exc:
-                st.error(f"Request failed: {exc}")
-            else:
-                st.success(
-                    f"Ingested document {result['document_id']} ({result['chunk_count']} chunk(s))"
-                )
+            )

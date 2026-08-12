@@ -18,6 +18,7 @@ from langchain_core.language_models import FakeListChatModel
 
 from backend.api.deps import (
     get_chat_model,
+    get_log_vector_store,
     get_ollama_client,
     get_rate_limiter,
     get_vector_store,
@@ -87,9 +88,7 @@ class FakeVectorStore:
     def payloads(self) -> list[dict[str, Any]]:
         return [
             {"id": id_, "text": text, "metadata": metadata}
-            for id_, text, metadata in zip(
-                self._ids, self._texts, self._metadatas, strict=True
-            )
+            for id_, text, metadata in zip(self._ids, self._texts, self._metadatas, strict=True)
         ]
 
 
@@ -97,9 +96,11 @@ class FakeVectorStore:
 def client() -> Iterator[TestClient]:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     # get_rate_limiter is a process-wide @lru_cache singleton in the app;
     # overriding it replaces the *provider*, which FastAPI calls fresh on
@@ -108,9 +109,7 @@ def client() -> Iterator[TestClient]:
     # constructing a new (always-empty) limiter inside the lambda.
     rate_limiter = InMemoryRateLimiter(max_requests=1000, window_seconds=60)
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
-    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
-        responses=[FAKE_ANSWER]
-    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(responses=[FAKE_ANSWER])
     with TestClient(app) as test_client:
         yield test_client
 
@@ -126,6 +125,22 @@ def test_ingest_document_returns_chunk_count(client: TestClient) -> None:
     body = response.json()
     assert body["chunk_count"] >= 1
     assert body["document_id"]
+
+
+def test_ingest_stream_returns_sse_step_events(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents",
+        json={"text": "Hello world, this is a test.", "stream": True},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: step" in response.text
+    assert "event: done" in response.text
+    assert '"step": "chunking"' in response.text
+    assert '"step": "embedding"' in response.text
+    assert '"step": "storing"' in response.text
 
 
 def test_ingest_and_search_round_trip(client: TestClient) -> None:
@@ -147,6 +162,40 @@ def test_ingest_and_search_round_trip(client: TestClient) -> None:
     assert len(results) >= 1
     assert results[0]["document_id"] == document_id
     assert results[0]["metadata"]["source"] == "test"
+
+
+def test_ask_log_route_answers_about_a_real_ingestion() -> None:
+    app = create_app()
+    fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
+    test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
+    app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
+    app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
+        max_requests=1000, window_seconds=60
+    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
+        responses=["LOG", "That document was ingested successfully."]
+    )
+
+    with TestClient(app) as test_client:
+        ingest_response = test_client.post(
+            "/api/v1/documents",
+            json={"text": "Some content to ingest."},
+            headers=AUTH_HEADERS,
+        )
+        document_id = ingest_response.json()["document_id"]
+
+        ask_response = test_client.post(
+            "/api/v1/documents/ask",
+            json={"query": f"What happened when I ingested document {document_id}?"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert ask_response.status_code == 200
+    assert ask_response.json()["answer"] == "That document was ingested successfully."
 
 
 def test_ingest_rejects_empty_text(client: TestClient) -> None:
@@ -190,20 +239,18 @@ def test_search_without_api_key_is_rejected(client: TestClient) -> None:
 def test_rate_limit_exceeded_returns_429() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     rate_limiter = InMemoryRateLimiter(max_requests=1, window_seconds=60)
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
 
     with TestClient(app) as test_client:
-        first = test_client.post(
-            "/api/v1/documents", json={"text": "one."}, headers=AUTH_HEADERS
-        )
-        second = test_client.post(
-            "/api/v1/documents", json={"text": "two."}, headers=AUTH_HEADERS
-        )
+        first = test_client.post("/api/v1/documents", json={"text": "one."}, headers=AUTH_HEADERS)
+        second = test_client.post("/api/v1/documents", json={"text": "two."}, headers=AUTH_HEADERS)
 
     assert first.status_code == 200
     assert second.status_code == 429
@@ -253,9 +300,11 @@ def test_ask_stream_returns_sse_events(client: TestClient) -> None:
 def test_ask_stream_greeting_routes_to_direct_answer() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -279,16 +328,16 @@ def test_ask_stream_greeting_routes_to_direct_answer() -> None:
 def test_ask_with_no_matching_documents_skips_generation() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
     )
-    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(
-        responses=[FAKE_ANSWER]
-    )
+    app.dependency_overrides[get_chat_model] = lambda: FakeListChatModel(responses=[FAKE_ANSWER])
 
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -329,9 +378,11 @@ def test_search_returns_results_from_hybrid_retrieval(client: TestClient) -> Non
 def test_ask_greeting_routes_to_direct_answer() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000)
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -377,6 +428,36 @@ def test_upload_txt_file_ingests_it(client: TestClient) -> None:
     assert body["document_id"]
 
 
+def test_upload_stream_returns_sse_step_events(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("notes.txt", b"Uploaded via multipart, streamed.", "text/plain")},
+        data={"stream": "true"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: step" in response.text
+    assert "event: done" in response.text
+    assert '"step": "loading"' in response.text
+    assert '"step": "chunking"' in response.text
+
+
+def test_upload_stream_unsupported_extension_yields_error_event(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("archive.zip", b"whatever", "application/zip")},
+        data={"stream": "true"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: error" in response.text
+    assert "event: done" not in response.text
+
+
 def test_upload_html_file_is_extracted_and_ingested(client: TestClient) -> None:
     html = b"<html><body><p>Extracted HTML content.</p></body></html>"
     response = client.post(
@@ -419,11 +500,13 @@ def test_upload_without_api_key_is_rejected(client: TestClient) -> None:
 def test_upload_over_size_limit_is_rejected() -> None:
     app = create_app()
     fake_store: VectorStore = FakeVectorStore()
+    fake_log_store: VectorStore = FakeVectorStore()
     test_settings = Settings(
         API_KEYS=[TEST_API_KEY], RATE_LIMIT_REQUESTS=1000, MAX_UPLOAD_SIZE_BYTES=10
     )
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
+    app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60

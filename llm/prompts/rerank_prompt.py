@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 RERANK_PROMPT = ChatPromptTemplate.from_template(
     "Given the question and the numbered candidate passages below, list "
     "the passage numbers in order of relevance to the question, most "
-    'relevant first. Respond with only a comma-separated list of '
+    "relevant first. Respond with only a comma-separated list of "
     'numbers (e.g. "3,1,2"), nothing else.\n\n'
     "Question: {question}\n\n"
     "Candidates:\n{candidates}"

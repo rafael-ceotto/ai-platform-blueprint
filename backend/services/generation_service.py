@@ -1,9 +1,10 @@
 """Orchestrates the answer-generation half of the RAG pipeline via a
-LangGraph query-routing graph (classify -> direct-answer or
-hybrid-retrieve -> rerank -> generate). See
+LangGraph query-routing graph (classify -> direct-answer, hybrid-retrieve
+-> rerank -> generate, or log-retrieve -> log-generate). See
 docs/adr/0006-hybrid-retrieval-and-query-routing.md,
-docs/adr/0004-langchain-for-answer-generation.md, and
-docs/adr/0007-sse-streaming.md.
+docs/adr/0004-langchain-for-answer-generation.md,
+docs/adr/0007-sse-streaming.md, and
+docs/adr/0013-etl-progress-and-queryable-ingestion-log.md.
 """
 
 from collections.abc import AsyncIterator
@@ -18,7 +19,7 @@ from llm.ollama.client import OllamaClient
 from llm.routing.query_graph import GraphState, build_query_graph
 from retrieval.retriever.hybrid import HybridVectorStore
 
-_STREAMED_NODES = frozenset({"generate", "direct_answer"})
+_STREAMED_NODES = frozenset({"generate", "direct_answer", "log_generate"})
 
 
 @dataclass
@@ -42,11 +43,12 @@ class GenerationService:
         settings: Settings,
         ollama_client: OllamaClient,
         vector_store: HybridVectorStore,
+        log_vector_store: HybridVectorStore,
         chat_model: BaseChatModel,
     ) -> None:
         self._default_top_k = settings.SEARCH_TOP_K_DEFAULT
         self._rerank_top_n = settings.RERANK_TOP_N
-        self._graph = build_query_graph(vector_store, ollama_client, chat_model)
+        self._graph = build_query_graph(vector_store, log_vector_store, ollama_client, chat_model)
 
     def _initial_state(self, query: str, top_k: int | None) -> GraphState:
         return {

@@ -37,6 +37,17 @@ def get_vector_store() -> FaissVectorStore:
     return FaissVectorStore(settings.VECTOR_STORE_PATH)
 
 
+@lru_cache
+def get_log_vector_store() -> FaissVectorStore:
+    """Return a process-wide singleton FAISS store for ingestion logs.
+
+    Independent index from `get_vector_store()` -- same mechanism, a
+    different directory -- see docs/adr/0013-etl-progress-and-queryable-ingestion-log.md.
+    """
+    settings = get_settings()
+    return FaissVectorStore(settings.LOG_VECTOR_STORE_PATH)
+
+
 def require_api_key(
     api_key: str | None = Security(api_key_header),
     settings: Settings = Depends(get_settings),

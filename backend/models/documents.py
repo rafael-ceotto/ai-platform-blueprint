@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class IngestRequest(BaseModel):
     text: str = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    stream: bool = False
 
 
 class IngestResponse(BaseModel):

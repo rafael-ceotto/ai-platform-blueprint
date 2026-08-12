@@ -14,9 +14,9 @@ from opentelemetry import trace
 
 from backend.config.settings import get_settings
 
-_RESERVED_LOG_RECORD_ATTRS = frozenset(logging.LogRecord(
-    "", 0, "", 0, "", (), None
-).__dict__.keys())
+_RESERVED_LOG_RECORD_ATTRS = frozenset(
+    logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
+)
 
 
 class JSONFormatter(logging.Formatter):

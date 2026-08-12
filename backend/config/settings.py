@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     VECTOR_STORE_PATH: str = "./data/vector_store"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 
+    # --- Ingestion log (queryable ETL history) ---
+    # See docs/adr/0013-etl-progress-and-queryable-ingestion-log.md
+    # A second, independent FaissVectorStore -- same mechanism as the
+    # content index above, just a different directory -- so ingestion
+    # runs are searchable/askable via the same hybrid retrieval code.
+    LOG_VECTOR_STORE_PATH: str = "./data/ingestion_logs"
+
     # --- RAG pipeline (chunking / retrieval) ---
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50

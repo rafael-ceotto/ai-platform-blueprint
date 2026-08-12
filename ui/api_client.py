@@ -27,6 +27,17 @@ class AskEvent:
     detail: str = ""
 
 
+@dataclass
+class IngestEvent:
+    """One step of a streamed /documents or /documents/upload response."""
+
+    type: str  # "step" | "done" | "error"
+    step: str = ""
+    document_id: str = ""
+    chunk_count: int = 0
+    detail: str = ""
+
+
 def _headers(api_key: str) -> dict[str, str]:
     return {"X-API-Key": api_key}
 
@@ -34,31 +45,6 @@ def _headers(api_key: str) -> dict[str, str]:
 def _raise_for_status(response: httpx2.Response) -> None:
     if response.is_error:
         raise ApiError(f"{response.status_code}: {response.text}")
-
-
-def ingest_text(base_url: str, api_key: str, text: str, metadata: dict[str, Any]) -> dict[str, Any]:
-    with httpx2.Client(base_url=base_url, timeout=60.0) as client:
-        response = client.post(
-            "/api/v1/documents",
-            json={"text": text, "metadata": metadata},
-            headers=_headers(api_key),
-        )
-        _raise_for_status(response)
-        return dict(response.json())
-
-
-def upload_file(
-    base_url: str, api_key: str, filename: str, content: bytes, metadata: dict[str, Any]
-) -> dict[str, Any]:
-    with httpx2.Client(base_url=base_url, timeout=60.0) as client:
-        response = client.post(
-            "/api/v1/documents/upload",
-            files={"file": (filename, content)},
-            data={"metadata": json.dumps(metadata)},
-            headers=_headers(api_key),
-        )
-        _raise_for_status(response)
-        return dict(response.json())
 
 
 def search(base_url: str, api_key: str, query: str, top_k: int | None) -> list[dict[str, Any]]:
@@ -70,6 +56,56 @@ def search(base_url: str, api_key: str, query: str, top_k: int | None) -> list[d
         )
         _raise_for_status(response)
         return list(response.json()["results"])
+
+
+def ingest_text_stream(
+    base_url: str, api_key: str, text: str, metadata: dict[str, Any]
+) -> Iterator[IngestEvent]:
+    """Yields IngestEvent("step", step=...) as ingestion progresses, then
+    one final IngestEvent("done", document_id=..., chunk_count=...) or
+    IngestEvent("error", detail=...)."""
+    with (
+        httpx2.Client(base_url=base_url, timeout=120.0) as client,
+        client.sse(
+            "/api/v1/documents",
+            method="POST",
+            json={"text": text, "metadata": metadata, "stream": True},
+            headers=_headers(api_key),
+        ) as source,
+    ):
+        yield from _parse_ingest_events(source)
+
+
+def upload_file_stream(
+    base_url: str, api_key: str, filename: str, content: bytes, metadata: dict[str, Any]
+) -> Iterator[IngestEvent]:
+    """Same shape as `ingest_text_stream`, for an uploaded file."""
+    with (
+        httpx2.Client(base_url=base_url, timeout=120.0) as client,
+        client.sse(
+            "/api/v1/documents/upload",
+            method="POST",
+            files={"file": (filename, content)},
+            data={"metadata": json.dumps(metadata), "stream": "true"},
+            headers=_headers(api_key),
+        ) as source,
+    ):
+        yield from _parse_ingest_events(source)
+
+
+def _parse_ingest_events(source: Any) -> Iterator[IngestEvent]:
+    for event in source:
+        payload = json.loads(event.data)
+        if event.event == "step":
+            yield IngestEvent(type="step", step=payload["step"])
+        elif event.event == "done":
+            yield IngestEvent(
+                type="done",
+                document_id=payload["document_id"],
+                chunk_count=payload["chunk_count"],
+            )
+        elif event.event == "error":
+            yield IngestEvent(type="error", detail=payload["detail"])
 
 
 def ask_stream(base_url: str, api_key: str, query: str, top_k: int | None) -> Iterator[AskEvent]:
