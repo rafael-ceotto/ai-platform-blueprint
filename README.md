@@ -9,6 +9,39 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+## 🚀 Try It
+
+No API keys, no billing, no sign-up — everything runs on your machine.
+
+**🖱️ Just want to click around?** (need [Docker Desktop](https://www.docker.com/products/docker-desktop/))
+
+```bash
+git clone <this-repo-url> && cd ai-platform-blueprint
+cp .env.example .env
+docker compose up -d --build
+
+# First run only — pulls the two local models (~5GB total)
+docker compose exec ollama ollama pull llama3.1:8b
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
+Open **http://localhost:8501** — upload a document, search it, ask it a
+question, and watch the answer stream in with cited sources. No terminal
+needed after this.
+
+**💻 Technical reviewer, want the API directly?**
+
+- Swagger UI, try every endpoint interactively: **http://localhost:8000/docs**
+- Or from a terminal, after the setup above:
+  ```bash
+  curl -X POST http://localhost:8000/api/v1/documents/ask \
+    -H "Content-Type: application/json" -H "X-API-Key: dev-local-key" \
+    -d '{"query": "What does this API do?"}'
+  ```
+- Full endpoint-by-endpoint walkthrough (upload, hybrid search, SSE
+  streaming) and the observability stack (Jaeger/Prometheus/Grafana):
+  see [Quickstart](#quickstart) below.
+
 ## Overview
 
 AI Platform Blueprint is a reference architecture — not a toy demo — for
