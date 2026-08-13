@@ -128,3 +128,15 @@ needs no changes on that day, only data.
 - Two new read-only, authenticated REST endpoints under
   `/api/v1/observability/*`.
 - No new Docker services, volumes, or compose changes.
+- **Expected behavior, not a bug**: the trace store is cumulative and
+  persists across container restarts (it lives on the `api_data` Docker
+  volume, same as the FAISS indexes) — it is not scoped to a browser
+  session, and there's no cache involved anywhere in this path. Opening
+  the Streamlit Observability tab and clicking "Load / refresh" shows
+  every `/documents/ask` call ever made against that volume, including
+  ones from `curl`, the MCP server (ADR-0016), or a previous session —
+  not just calls made since the tab was opened. It's also normal to see
+  traces with **zero ingested documents**: every `/ask` request routes
+  through `classify_query` first (see ADR-0006), which is itself an LLM
+  call and gets recorded regardless of whether anything was ever
+  ingested or whether the query ultimately finds any context.
