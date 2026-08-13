@@ -104,6 +104,11 @@ make test         # run the test suite with coverage
 make check        # lint + typecheck + test (what CI runs)
 ```
 
+CI run notifications (pass/fail) can be sent to Slack via GitHub's own
+Slack app -- no code involved: `/github subscribe <owner>/<repo>
+workflows:{event:"push" branch:"main"}` in any channel. See
+[GitHub's Slack integration docs](https://docs.github.com/en/integrations/how-tos/slack/customize-notifications).
+
 ## License
 
 [MIT](LICENSE)
