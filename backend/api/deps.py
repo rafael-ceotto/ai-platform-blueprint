@@ -15,6 +15,7 @@ from backend.api.rate_limit import InMemoryRateLimiter
 from backend.api.security import api_key_header, verify_api_key
 from backend.config.settings import Settings, get_settings
 from llm.ollama.client import OllamaClient
+from observability.llm_traces.store import LLMTraceStore
 from retrieval.vector_store.faiss_store import FaissVectorStore
 
 
@@ -46,6 +47,15 @@ def get_log_vector_store() -> FaissVectorStore:
     """
     settings = get_settings()
     return FaissVectorStore(settings.LOG_VECTOR_STORE_PATH)
+
+
+@lru_cache
+def get_llm_trace_store() -> LLMTraceStore:
+    """Return a process-wide singleton store for LLM call traces (cost /
+    tokens / latency) -- see docs/adr/0015-llm-tracing-and-cost-observability.md.
+    """
+    settings = get_settings()
+    return LLMTraceStore(settings.LLM_TRACE_DB_PATH)
 
 
 def require_api_key(

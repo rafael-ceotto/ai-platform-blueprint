@@ -108,6 +108,24 @@ def _parse_ingest_events(source: Any) -> Iterator[IngestEvent]:
             yield IngestEvent(type="error", detail=payload["detail"])
 
 
+def get_traces(base_url: str, api_key: str, limit: int = 50) -> list[dict[str, Any]]:
+    with httpx2.Client(base_url=base_url, timeout=30.0) as client:
+        response = client.get(
+            "/api/v1/observability/traces",
+            params={"limit": limit},
+            headers=_headers(api_key),
+        )
+        _raise_for_status(response)
+        return list(response.json()["traces"])
+
+
+def get_trace_summary(base_url: str, api_key: str) -> dict[str, Any]:
+    with httpx2.Client(base_url=base_url, timeout=30.0) as client:
+        response = client.get("/api/v1/observability/summary", headers=_headers(api_key))
+        _raise_for_status(response)
+        return dict(response.json())
+
+
 def ask_stream(base_url: str, api_key: str, query: str, top_k: int | None) -> Iterator[AskEvent]:
     """Yields AskEvent("token", content=...) as they arrive, then one
     final AskEvent("done", answer=..., sources=...) or

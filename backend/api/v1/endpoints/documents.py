@@ -31,6 +31,7 @@ from langchain_core.language_models import BaseChatModel
 from backend.api.deps import (
     enforce_rate_limit,
     get_chat_model,
+    get_llm_trace_store,
     get_log_vector_store,
     get_ollama_client,
     get_vector_store,
@@ -49,6 +50,7 @@ from backend.services.generation_service import GenerationService
 from backend.services.ingestion_service import IngestionService
 from ingestion.loaders.dispatch import UnsupportedFileTypeError, load_document
 from llm.ollama.client import OllamaClient
+from observability.llm_traces.port import LLMTraceStorePort
 from retrieval.retriever.hybrid import HybridVectorStore, build_hybrid_retriever, with_rrf_scores
 from retrieval.vector_store.port import VectorStore
 
@@ -167,9 +169,12 @@ async def ask_documents(
     vector_store: HybridVectorStore = Depends(get_vector_store),
     log_vector_store: HybridVectorStore = Depends(get_log_vector_store),
     chat_model: BaseChatModel = Depends(get_chat_model),
+    llm_trace_store: LLMTraceStorePort = Depends(get_llm_trace_store),
     _: None = Depends(enforce_rate_limit),
 ) -> AskResponse | StreamingResponse:
-    generation = GenerationService(settings, ollama, vector_store, log_vector_store, chat_model)
+    generation = GenerationService(
+        settings, ollama, vector_store, log_vector_store, chat_model, llm_trace_store
+    )
 
     if body.stream:
         return StreamingResponse(

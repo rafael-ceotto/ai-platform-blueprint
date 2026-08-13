@@ -45,7 +45,8 @@ C4Container
         Container(ui, "Demo UI", "Streamlit / Python 3.12", "Ask (streamed), search, and ingest -- a thin client over the API, beyond Swagger (see ADR-0010)")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Stores document embeddings, serves nearest-neighbor search (see ADR-0001)")
         Container(logstore, "Ingestion Log Store", "FAISS (in-process)", "A second, independent FAISS index of ingestion-run records, searchable the same way as content (see ADR-0013)")
-        ContainerDb(datavol, "Data Volume", "Docker volume", "Persists FAISS index files and other local artifacts")
+        Container(tracestore, "LLM Trace Store", "SQLite (in-process)", "Records prompt/completion/tokens/latency/cost for every LLM call made while answering a question (see ADR-0015)")
+        ContainerDb(datavol, "Data Volume", "Docker volume", "Persists FAISS index files, the trace SQLite file, and other local artifacts")
     }
 
     Container_Ext(ollama, "Ollama", "Container / ollama/ollama", "Serves open-weight LLMs for generation and embeddings (see ADR-0002)")
@@ -58,8 +59,10 @@ C4Container
     Rel(ui, api, "Ingest / search / ask (incl. streamed)", "HTTP/REST + SSE")
     Rel(api, vectorstore, "Similarity search / upsert", "in-process call")
     Rel(api, logstore, "Logs each ingestion / searches ingestion history", "in-process call")
+    Rel(api, tracestore, "Records every LLM call made while answering a question", "in-process call")
     Rel(vectorstore, datavol, "Reads/writes index", "filesystem")
     Rel(logstore, datavol, "Reads/writes index", "filesystem")
+    Rel(tracestore, datavol, "Reads/writes SQLite file", "filesystem")
     Rel(api, ollama, "Generate / embed", "HTTP :11434")
     Rel(api, jaeger, "Exports request + outbound-HTTP spans", "OTLP/gRPC :4317")
     Rel(prometheus, api, "Scrapes", "HTTP GET /metrics")
@@ -81,6 +84,7 @@ C4Component
         Component(deps, "Dependency Providers", "backend/api/deps.py", "Constructs OllamaClient / VectorStore per request; overridable in tests")
         Component(healthEp, "Health Endpoints", "backend/api/v1/endpoints/health.py", "Liveness (/health) and readiness (/health/ready) probes")
         Component(documentsEp, "Document Endpoints", "backend/api/v1/endpoints/documents.py", "Ingest (POST /documents), upload (POST /documents/upload), search (POST /documents/search), ask (POST /documents/ask)")
+        Component(observabilityEp, "Observability Endpoints", "backend/api/v1/endpoints/observability.py", "Read-only: recent LLM traces (GET /observability/traces) and aggregate cost/latency stats (GET /observability/summary) (see ADR-0015)")
         Component(config, "Settings", "backend/config/settings.py", "Typed configuration loaded from env / .env")
         Component(security, "API Key Auth", "backend/api/security.py", "Verifies the X-API-Key header against configured keys")
         Component(rateLimit, "Rate Limiter", "backend/api/rate_limit.py", "In-memory, per-key fixed-window request limiter")
@@ -98,6 +102,8 @@ C4Component
         Component(ragPrompt, "Prompts", "llm/prompts/*.py", "RAG / classify / rerank / direct-answer / log-answer ChatPromptTemplates")
         Component(ollamaClient, "Ollama Client", "llm/ollama/client.py", "Thin async HTTP client for the Ollama API (generate + embed)")
         Component(chatModel, "Chat Model", "backend/api/deps.py (get_chat_model)", "LangChain ChatOllama, injected for testability")
+        Component(traceCallback, "LLM Trace Callback", "observability/llm_traces/callback.py", "AsyncCallbackHandler attached per-request; captures every chat-model call the Query Graph makes, tagged by node (see ADR-0015)")
+        Component(traceStore, "LLM Trace Store", "observability/llm_traces/store.py", "SQLite-backed: records traces, serves recent()/summary() for the dashboard (see ADR-0015)")
         Component(logging, "Logging Setup", "observability/logging/setup.py", "Structured JSON logging; adds trace_id/span_id when a span is active (see ADR-0008)")
         Component(errors, "Error Handler", "backend/api/errors.py", "Catch-all for unhandled exceptions: safe JSON 500, always logged")
         Component(tracingSetup, "Tracing Setup", "observability/tracing/setup.py", "Builds the TracerProvider, instruments FastAPI + httpx; no-op unless Settings.TRACING_ENABLED (see ADR-0008)")
@@ -114,6 +120,9 @@ C4Component
     Rel(main, errors, "registers as catch-all exception handler")
     Rel(router, healthEp, "mounts")
     Rel(router, documentsEp, "mounts")
+    Rel(router, observabilityEp, "mounts")
+    Rel(observabilityEp, deps, "resolves LLM Trace Store via")
+    Rel(observabilityEp, traceStore, "reads recent()/summary() from")
     Rel(healthEp, config, "reads settings from")
     Rel(healthEp, ollamaClient, "checks reachability via")
     Rel(documentsEp, deps, "resolves services via")
@@ -131,6 +140,10 @@ C4Component
     Rel(vectorPort, faissStore, "implemented by")
     Rel(ingestion, faissStore, "logs each run to a second instance of")
     Rel(generation, queryGraph, "builds once, invokes per request")
+    Rel(generation, traceCallback, "attaches a fresh instance to each graph invocation")
+    Rel(traceCallback, chatModel, "observes every call to, via LangGraph callbacks")
+    Rel(traceCallback, traceStore, "persists each call to")
+    Rel(traceStore, datavol, "persists SQLite file to")
     Rel(queryGraph, hybridRetriever, "retrieves context via (hybrid_retrieve node)")
     Rel(queryGraph, faissStore, "log_retrieve queries a second instance of")
     Rel(queryGraph, ragPrompt, "formats classify/rerank/generate/log-answer prompts via")
@@ -188,5 +201,14 @@ C4Component
   path (`Settings.LOG_VECTOR_STORE_PATH`), not new code. Kept as a
   fully separate index from content on purpose, so a content question
   never surfaces an ingestion-log fragment (ADR-0013).
+- The LLM Trace Store is the project's first SQL-backed component --
+  a per-request LLM Trace Callback attached to the Query Graph's own
+  `.ainvoke()`/`.astream()` call captures every chat-model call it
+  makes (prompt, completion, tokens, latency, estimated cost),
+  attributed to the LangGraph node that triggered it, and persists each
+  one to SQLite; the Observability Endpoints expose it read-only for
+  the Demo UI's Observability tab (ADR-0015). It's a foundation for a
+  future automated eval harness, not built yet (ADR-0015's revisit
+  triggers).
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

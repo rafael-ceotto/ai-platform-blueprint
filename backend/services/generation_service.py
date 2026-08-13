@@ -10,13 +10,17 @@ docs/adr/0013-etl-progress-and-queryable-ingestion-log.md.
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from typing import Any, cast
+from uuid import uuid4
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 
 from backend.config.settings import Settings
 from llm.ollama.client import OllamaClient
 from llm.routing.query_graph import GraphState, build_query_graph
+from observability.llm_traces.callback import LLMTraceCallbackHandler
+from observability.llm_traces.port import LLMTraceStorePort
 from retrieval.retriever.hybrid import HybridVectorStore
 
 _STREAMED_NODES = frozenset({"generate", "direct_answer", "log_generate"})
@@ -45,10 +49,21 @@ class GenerationService:
         vector_store: HybridVectorStore,
         log_vector_store: HybridVectorStore,
         chat_model: BaseChatModel,
+        llm_trace_store: LLMTraceStorePort,
     ) -> None:
         self._default_top_k = settings.SEARCH_TOP_K_DEFAULT
         self._rerank_top_n = settings.RERANK_TOP_N
+        self._model = settings.OLLAMA_MODEL
+        self._llm_trace_store = llm_trace_store
         self._graph = build_query_graph(vector_store, log_vector_store, ollama_client, chat_model)
+
+    def _trace_config(self) -> RunnableConfig:
+        """Build a per-request LangGraph config that records every chat-model
+        call the graph makes (across all nodes) as an `LLMTrace` -- see
+        `observability/llm_traces/callback.py` and docs/adr/0015."""
+        request_id = str(uuid4())
+        callback = LLMTraceCallbackHandler(self._llm_trace_store, request_id, self._model)
+        return {"metadata": {"request_id": request_id}, "callbacks": [callback]}
 
     def _initial_state(self, query: str, top_k: int | None) -> GraphState:
         return {
@@ -73,7 +88,9 @@ class GenerationService:
         ]
 
     async def ask(self, query: str, top_k: int | None) -> AskResult:
-        result = await self._graph.ainvoke(self._initial_state(query, top_k))
+        result = await self._graph.ainvoke(
+            self._initial_state(query, top_k), config=self._trace_config()
+        )
         return AskResult(answer=result["answer"], sources=self._sources(result["documents"]))
 
     async def ask_stream(self, query: str, top_k: int | None) -> AsyncIterator[dict[str, Any]]:
@@ -102,7 +119,9 @@ class GenerationService:
         stream = cast(
             "AsyncIterator[tuple[str, Any]]",
             self._graph.astream(
-                self._initial_state(query, top_k), stream_mode=["messages", "values"]
+                self._initial_state(query, top_k),
+                config=self._trace_config(),
+                stream_mode=["messages", "values"],
             ),
         )
         async for stream_mode, payload in stream:

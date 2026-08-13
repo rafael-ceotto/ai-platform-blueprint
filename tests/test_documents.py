@@ -18,6 +18,7 @@ from langchain_core.language_models import FakeListChatModel
 
 from backend.api.deps import (
     get_chat_model,
+    get_llm_trace_store,
     get_log_vector_store,
     get_ollama_client,
     get_rate_limiter,
@@ -26,6 +27,7 @@ from backend.api.deps import (
 from backend.api.rate_limit import InMemoryRateLimiter
 from backend.config.settings import Settings, get_settings
 from backend.main import create_app
+from observability.llm_traces.models import LLMTrace, TraceSummary
 from retrieval.vector_store.port import SearchResult, VectorStore
 
 FAKE_ANSWER = "The retrieved context says so."
@@ -92,6 +94,22 @@ class FakeVectorStore:
         ]
 
 
+class FakeLLMTraceStore:
+    """In-memory `LLMTraceStorePort` -- avoids real writes to ./data/llm_traces.db."""
+
+    def __init__(self) -> None:
+        self.traces: list[LLMTrace] = []
+
+    def record(self, trace: LLMTrace) -> None:
+        self.traces.append(trace)
+
+    def recent(self, limit: int = 50) -> list[LLMTrace]:
+        return self.traces[:limit]
+
+    def summary(self) -> TraceSummary:
+        raise NotImplementedError
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app = create_app()
@@ -101,6 +119,7 @@ def client() -> Iterator[TestClient]:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     # get_rate_limiter is a process-wide @lru_cache singleton in the app;
     # overriding it replaces the *provider*, which FastAPI calls fresh on
@@ -172,6 +191,7 @@ def test_ask_log_route_answers_about_a_real_ingestion() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -244,6 +264,7 @@ def test_rate_limit_exceeded_returns_429() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     rate_limiter = InMemoryRateLimiter(max_requests=1, window_seconds=60)
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
@@ -305,6 +326,7 @@ def test_ask_stream_greeting_routes_to_direct_answer() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -333,6 +355,7 @@ def test_ask_with_no_matching_documents_skips_generation() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -383,6 +406,7 @@ def test_ask_greeting_routes_to_direct_answer() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60
@@ -507,6 +531,7 @@ def test_upload_over_size_limit_is_rejected() -> None:
     app.dependency_overrides[get_ollama_client] = lambda: FakeOllamaClient()
     app.dependency_overrides[get_vector_store] = lambda: fake_store
     app.dependency_overrides[get_log_vector_store] = lambda: fake_log_store
+    app.dependency_overrides[get_llm_trace_store] = lambda: FakeLLMTraceStore()
     app.dependency_overrides[get_settings] = lambda: test_settings
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter(
         max_requests=1000, window_seconds=60

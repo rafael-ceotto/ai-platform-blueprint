@@ -23,7 +23,9 @@ api_key = st.sidebar.text_input(
 st.title("Konsole.ai")
 st.caption("A minimal demo UI over the RAG API -- ask, search, and ingest, beyond Swagger.")
 
-ask_tab, search_tab, ingest_tab = st.tabs(["💬 Ask", "🔍 Search", "📄 Ingest"])
+ask_tab, search_tab, ingest_tab, observability_tab = st.tabs(
+    ["💬 Ask", "🔍 Search", "📄 Ingest", "📊 Observability"]
+)
 
 
 with ask_tab:
@@ -146,3 +148,68 @@ with ingest_tab:
                     base_url, api_key, uploaded.name, uploaded.getvalue(), {}
                 )
             )
+
+
+with observability_tab:
+    st.subheader("LLM call observability")
+    st.caption(
+        "Every chat-model call made while answering a question -- prompt, "
+        "completion, tokens, latency, and estimated cost. Local Ollama models "
+        "are free, so cost reads $0.00 unless a paid provider is configured."
+    )
+
+    if st.button("Load / refresh", key="observability_refresh"):
+        try:
+            st.session_state["observability_summary"] = api_client.get_trace_summary(
+                base_url, api_key
+            )
+            st.session_state["observability_traces"] = api_client.get_traces(
+                base_url, api_key, limit=50
+            )
+        except api_client.ApiError as exc:
+            st.error(f"Request failed: {exc}")
+
+    summary = st.session_state.get("observability_summary")
+    traces = st.session_state.get("observability_traces")
+
+    if summary is None:
+        st.info("Click 'Load / refresh' to fetch LLM call traces.")
+    else:
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("Requests", summary["total_requests"])
+        metric_cols[1].metric("LLM calls", summary["total_calls"])
+        metric_cols[2].metric("Total cost", f"${summary['total_cost_usd']:.4f}")
+        metric_cols[3].metric("Avg latency", f"{summary['avg_latency_ms']:.0f} ms")
+
+        if summary["by_node"]:
+            st.caption("Breakdown by graph node")
+            st.dataframe(summary["by_node"], hide_index=True)
+
+        if traces:
+            st.caption("Recent calls")
+            st.dataframe(
+                [
+                    {
+                        "node": t["node"],
+                        "model": t["model"],
+                        "prompt_tokens": t["prompt_tokens"],
+                        "completion_tokens": t["completion_tokens"],
+                        "latency_ms": round(t["latency_ms"], 1),
+                        "cost_usd": t["cost_usd"],
+                        "created_at": t["created_at"],
+                    }
+                    for t in traces
+                ],
+                hide_index=True,
+            )
+            with st.expander("Prompt / completion text for a call"):
+                labels = [f"{t['created_at']} -- {t['node']}" for t in traces]
+                selected = st.selectbox(
+                    "Call", options=range(len(traces)), format_func=lambda i: labels[i]
+                )
+                st.text_area("Prompt", traces[selected]["prompt"], height=150, disabled=True)
+                st.text_area(
+                    "Completion", traces[selected]["completion"], height=100, disabled=True
+                )
+        else:
+            st.info("No LLM calls recorded yet -- ask a question in the Ask tab first.")

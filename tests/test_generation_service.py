@@ -7,6 +7,7 @@ from langchain_core.language_models import FakeListChatModel
 from backend.config.settings import Settings
 from backend.services.generation_service import GenerationService
 from llm.routing.query_graph import NO_CONTEXT_ANSWER
+from observability.llm_traces.models import LLMTrace, TraceSummary
 from retrieval.vector_store.port import SearchResult
 
 FAKE_ANSWER = "Local SLMs run entirely on your machine."
@@ -42,6 +43,22 @@ class FakeHybridStore:
         return [{"id": r.id, "text": r.text, "metadata": r.metadata} for r in self._results]
 
 
+class FakeLLMTraceStore:
+    """In-memory `LLMTraceStorePort` -- records whatever the callback sends it."""
+
+    def __init__(self) -> None:
+        self.traces: list[LLMTrace] = []
+
+    def record(self, trace: LLMTrace) -> None:
+        self.traces.append(trace)
+
+    def recent(self, limit: int = 50) -> list[LLMTrace]:
+        return self.traces[:limit]
+
+    def summary(self) -> TraceSummary:
+        raise NotImplementedError
+
+
 def _settings() -> Settings:
     return Settings(SEARCH_TOP_K_DEFAULT=5, RERANK_TOP_N=3)
 
@@ -56,6 +73,7 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
         )
     ]
     store = FakeHybridStore(results)
+    trace_store = FakeLLMTraceStore()
     # A single retrieved document -> rerank is a no-op (len <= 1), so the
     # chat model is called exactly twice: classify, then generate.
     service = GenerationService(
@@ -64,6 +82,7 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+        trace_store,
     )
 
     result = await service.ask("How do SLMs run?", top_k=None)
@@ -72,6 +91,16 @@ async def test_ask_returns_generated_answer_and_sources() -> None:
     assert len(result.sources) == 1
     assert result.sources[0].chunk_id == "doc-1:0"
     assert result.sources[0].document_id == "doc-1"
+
+    # One trace per chat-model call, correctly attributed to its node, all
+    # sharing the same request_id.
+    nodes = [t.node for t in trace_store.traces]
+    assert nodes == ["classify_query", "generate"]
+    assert len({t.request_id for t in trace_store.traces}) == 1
+    assert trace_store.traces[-1].completion == FAKE_ANSWER
+    # FakeListChatModel doesn't populate usage_metadata, so token counts
+    # are expected to be unknown rather than a fabricated number.
+    assert trace_store.traces[-1].prompt_tokens is None
 
 
 async def test_ask_with_no_retrieved_documents_skips_the_llm() -> None:
@@ -84,6 +113,7 @@ async def test_ask_with_no_retrieved_documents_skips_the_llm() -> None:
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+        FakeLLMTraceStore(),
     )
 
     result = await service.ask("Anything?", top_k=None)
@@ -102,6 +132,7 @@ async def test_ask_routes_greeting_to_direct_answer_without_retrieval() -> None:
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["DIRECT", "Hello! How can I help?"]),
+        FakeLLMTraceStore(),
     )
 
     result = await service.ask("hi there", top_k=None)
@@ -124,6 +155,7 @@ async def test_ask_reranks_multiple_candidates_before_generating() -> None:
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", "2,1", FAKE_ANSWER]),
+        FakeLLMTraceStore(),
     )
 
     result = await service.ask("relevant question", top_k=None)
@@ -142,12 +174,14 @@ async def test_ask_stream_yields_tokens_only_from_generate_node() -> None:
         )
     ]
     store = FakeHybridStore(results)
+    trace_store = FakeLLMTraceStore()
     service = GenerationService(
         _settings(),
         FakeOllamaClient(),
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+        trace_store,
     )
 
     events = [event async for event in service.ask_stream("How do SLMs run?", top_k=None)]
@@ -163,6 +197,7 @@ async def test_ask_stream_yields_tokens_only_from_generate_node() -> None:
     assert "RETRIEVE" not in streamed_answer
     assert done_events[0]["answer"] == FAKE_ANSWER
     assert done_events[0]["sources"][0]["chunk_id"] == "doc-1:0"
+    assert [t.node for t in trace_store.traces] == ["classify_query", "generate"]
 
 
 async def test_ask_stream_direct_answer_path_streams_tokens_too() -> None:
@@ -173,6 +208,7 @@ async def test_ask_stream_direct_answer_path_streams_tokens_too() -> None:
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["DIRECT", "Hi there!"]),
+        FakeLLMTraceStore(),
     )
 
     events = [event async for event in service.ask_stream("hi", top_k=None)]
@@ -193,6 +229,7 @@ async def test_ask_stream_with_no_documents_has_no_tokens_but_final_answer() -> 
         store,
         FakeHybridStore([]),
         FakeListChatModel(responses=["RETRIEVE", FAKE_ANSWER]),
+        FakeLLMTraceStore(),
     )
 
     events = [event async for event in service.ask_stream("anything", top_k=None)]

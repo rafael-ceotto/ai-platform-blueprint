@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # runs are searchable/askable via the same hybrid retrieval code.
     LOG_VECTOR_STORE_PATH: str = "./data/ingestion_logs"
 
+    # --- LLM call tracing (cost / tokens / latency observability) ---
+    # See docs/adr/0015-llm-tracing-and-cost-observability.md
+    LLM_TRACE_DB_PATH: str = "./data/llm_traces.db"
+
     # --- RAG pipeline (chunking / retrieval) ---
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
