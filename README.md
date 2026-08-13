@@ -108,6 +108,11 @@ CI run notifications (pass/fail) can be sent to Slack via GitHub's own
 Slack app -- no code involved: `/github subscribe <owner>/<repo>
 workflows:{event:"push" branch:"main"}` in any channel. See
 [GitHub's Slack integration docs](https://docs.github.com/en/integrations/how-tos/slack/customize-notifications).
+If you already ran the bare `/github subscribe <owner>/<repo> workflows`
+(default: pull-request-triggered runs only, so pushes to `main` never
+notify), the filtered command silently no-ops with "you're already
+subscribed" instead of updating the filter -- `/github unsubscribe
+<owner>/<repo> workflows` first, then re-subscribe with the filter.
 
 ## License
 
