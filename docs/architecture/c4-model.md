@@ -39,10 +39,12 @@ C4Container
     title Container Diagram — Konsole.ai
 
     Person(user, "End User")
+    Person(mcpClient, "MCP Client", "e.g. Claude Desktop -- spawns the MCP Server as a local subprocess (see ADR-0016)")
 
     System_Boundary(platform, "Konsole.ai") {
         Container(api, "API Service", "FastAPI / Python 3.12", "Exposes REST endpoints, orchestrates retrieval + generation, owns request validation and auth")
         Container(ui, "Demo UI", "Streamlit / Python 3.12", "Ask (streamed), search, and ingest -- a thin client over the API, beyond Swagger (see ADR-0010)")
+        Container(mcpServer, "MCP Server", "Python / stdio (mcp SDK)", "Exposes ask/search/ingest_text as MCP tools over stdio; a thin HTTP client over the API, spawned locally on demand -- no hosting, $0 marginal cost (see ADR-0016)")
         Container(vectorstore, "Vector Store", "FAISS (in-process)", "Stores document embeddings, serves nearest-neighbor search (see ADR-0001)")
         Container(logstore, "Ingestion Log Store", "FAISS (in-process)", "A second, independent FAISS index of ingestion-run records, searchable the same way as content (see ADR-0013)")
         Container(tracestore, "LLM Trace Store", "SQLite (in-process)", "Records prompt/completion/tokens/latency/cost for every LLM call made while answering a question (see ADR-0015)")
@@ -57,6 +59,8 @@ C4Container
     Rel(user, api, "HTTPS requests", "JSON/REST")
     Rel(user, ui, "Browses to", "HTTP")
     Rel(ui, api, "Ingest / search / ask (incl. streamed)", "HTTP/REST + SSE")
+    Rel(mcpClient, mcpServer, "Spawns as a subprocess / calls tools via", "stdio (JSON-RPC)")
+    Rel(mcpServer, api, "ask / search / ingest_text tool calls", "HTTP/REST")
     Rel(api, vectorstore, "Similarity search / upsert", "in-process call")
     Rel(api, logstore, "Logs each ingestion / searches ingestion history", "in-process call")
     Rel(api, tracestore, "Records every LLM call made while answering a question", "in-process call")
@@ -195,6 +199,13 @@ C4Component
   Component diagram) is a separate deployable with its own image and
   dependencies, talking to the API purely over HTTP -- it never imports
   backend code (ADR-0010).
+- The MCP Server (Container level only, same reasoning as the Demo UI
+  -- three small files, not broken out into its own Component diagram)
+  is the same kind of external consumer as the Demo UI: talks to the
+  API only over HTTP, never imports backend code. Unlike the Demo UI it
+  is never a standing container -- there's no `docker-compose.yml`
+  service for it, since an MCP client spawns it as a local subprocess
+  over stdio on demand, so it costs nothing when not in use (ADR-0016).
 - The Ingestion Log Store (Container level) and the second `faissStore`
   instance it maps to (Component level) are the *same* `FaissVectorStore`
   class as the content Vector Store -- a second instance at a different

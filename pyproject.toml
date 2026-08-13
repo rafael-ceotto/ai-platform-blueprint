@@ -61,9 +61,20 @@ ui = [
   "streamlit>=1.61.0",
   "httpx2>=2.10.0",
 ]
+# mcp_server/ is never deployed/containerized (it's a stdio subprocess
+# spawned locally by an MCP client, e.g. Claude Desktop) -- confirmed via
+# `pip check` to not conflict with fastapi/starlette/httpx/pydantic, so
+# it's a plain extra here rather than ui/-style full isolation. See
+# docs/adr/0016-mcp-server-support.md.
+mcp = [
+  "mcp[cli]>=2.0.0",
+]
+
+[project.scripts]
+konsole-mcp-server = "mcp_server.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "ingestion", "retrieval", "llm", "observability"]
+packages = ["backend", "ingestion", "retrieval", "llm", "observability", "mcp_server"]
 
 [tool.ruff]
 line-length = 100
@@ -74,7 +85,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N"]
 ignore = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["backend", "ingestion", "retrieval", "llm", "observability"]
+known-first-party = ["backend", "ingestion", "retrieval", "llm", "observability", "mcp_server"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -97,8 +108,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --cov=backend --cov=ingestion --cov=retrieval --cov=llm --cov=observability --cov-report=term-missing"
+addopts = "-ra --cov=backend --cov=ingestion --cov=retrieval --cov=llm --cov=observability --cov=mcp_server --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["backend", "ingestion", "retrieval", "llm", "observability"]
+source = ["backend", "ingestion", "retrieval", "llm", "observability", "mcp_server"]
 omit = ["tests/*"]

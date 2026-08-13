@@ -31,13 +31,13 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev,ui]"
+        run: pip install -e ".[dev,ui,mcp]"
 
       - name: Lint (ruff)
         run: ruff check .
 
       - name: Type check (mypy)
-        run: mypy backend ingestion retrieval llm observability
+        run: mypy backend ingestion retrieval llm observability mcp_server
 
       - name: Test (pytest)
         run: pytest --cov-report=xml

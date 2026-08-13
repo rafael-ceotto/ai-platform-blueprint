@@ -61,10 +61,13 @@ Python install too.
   whatever language you asked in.
 - Everything's behind API-key auth and per-key rate limiting.
 - A minimal Streamlit UI covers all of this beyond Swagger.
+- Also runs as an **MCP server** (`mcp_server/`, stdio) — `ask`/`search`/
+  `ingest_text` as tools any MCP client (e.g. Claude Desktop) can call,
+  zero hosting cost (see ADR-0016).
 
 ## Tech Stack
 
-FastAPI · Ollama · FAISS · LangChain / LangGraph · Streamlit ·
+FastAPI · Ollama · FAISS · LangChain / LangGraph · Streamlit · MCP ·
 OpenTelemetry + Prometheus + Grafana · Docker Compose · pytest / ruff / mypy
 
 Every non-obvious choice — why FAISS over Qdrant, why local Ollama over

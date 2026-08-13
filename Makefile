@@ -1,7 +1,7 @@
-.PHONY: install run ui test lint format typecheck check docker-build docker-up docker-down docker-logs clean
+.PHONY: install run ui test lint format typecheck mcp-dev check docker-build docker-up docker-down docker-logs clean
 
 install:
-	pip install -e ".[dev,ui]"
+	pip install -e ".[dev,ui,mcp]"
 
 run:
 	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
@@ -20,7 +20,10 @@ format:
 	ruff check --fix .
 
 typecheck:
-	mypy backend ingestion retrieval llm observability
+	mypy backend ingestion retrieval llm observability mcp_server
+
+mcp-dev:
+	mcp dev mcp_server/server.py
 
 check: lint typecheck test
 
