@@ -5,7 +5,7 @@
 | **Status** | Accepted |
 | **Date** | 2026-08-13 |
 | **Deciders** | Konsole.ai team |
-| **Related** | [ADR-0002: LLM Runtime](0002-llm-runtime-ollama-vs-external-apis.md), [ADR-0011: Docker Compose Profiles](0011-docker-compose-profiles.md), [ADR-0012: CI/CD & GHCR Publishing](0012-ci-cd-ghcr-publishing.md) |
+| **Related** | [ADR-0002: LLM Runtime](0002-llm-runtime-ollama-vs-external-apis.md), [ADR-0011: Docker Compose Profiles](0011-docker-compose-profiles.md), [ADR-0012: CI/CD & GHCR Publishing](0012-ci-cd-ghcr-publishing.md), [ADR-0017: Terraform (AWS EKS) + Helm Chart](0017-terraform-aws-eks-and-helm-chart.md) |
 
 ## Context
 
@@ -114,3 +114,5 @@ addition.
   exists to record the reasoning so the question doesn't need
   re-litigating, and so the trade-off is visible to anyone reviewing
   this blueprint's architecture decisions.
+- The manifests/Helm chart and Terraform this ADR deferred were built
+  under ADR-0017, still never applied live.

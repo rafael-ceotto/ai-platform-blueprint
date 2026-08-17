@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "konsole-ai.fullname" . }}-ollama
+  labels:
+    {{- include "konsole-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  clusterIP: None
+  ports:
+    - name: http
+      port: {{ .Values.ollama.service.port }}
+      targetPort: http
+  selector:
+    {{- include "konsole-ai.selectorLabels" (dict "root" $ "component" "ollama") | nindent 4 }}

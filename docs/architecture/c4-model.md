@@ -221,5 +221,21 @@ C4Component
   the Demo UI's Observability tab (ADR-0015). It's a foundation for a
   future automated eval harness, not built yet (ADR-0015's revisit
   triggers).
+- **Deployment (not diagrammed -- static/validate-only artifacts, never
+  applied live, see ADR-0014/ADR-0017)**: `terraform/` provisions an AWS
+  VPC + EKS control plane, a default CPU-only managed node group, and an
+  opt-in scale-to-zero GPU node group (IRSA/OIDC enabled) via the
+  `terraform-aws-modules/vpc` and `terraform-aws-modules/eks` community
+  modules. `helm/konsole-ai/` deploys onto *some* cluster independently of
+  Terraform (validated via `kind`, not coupled to a live EKS cluster):
+  `api` as a single-replica Deployment (no HPA -- its FAISS indexes and
+  SQLite trace store are local files on one PVC, an inherited constraint
+  from ADR-0001/ADR-0013/ADR-0015, not a Helm oversight), `ollama` as a
+  StatefulSet with a `volumeClaimTemplate` for pulled models, and `ui` as
+  an autoscaled Deployment (the only component with no local state). The
+  two artifacts share exactly one contract -- a `nvidia.com/gpu`
+  taint/label key/value pair -- so Terraform's optional GPU node group and
+  the Helm chart's optional GPU toleration on the `ollama` pod stay
+  consistent without either depending on the other being live.
 - Keep this file in sync with the `backend`/`ingestion`/`retrieval`/`llm`/`observability` structure as new containers/components
   are added (e.g. a future ingestion worker, a Qdrant adapter, etc.).

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: konsole-ai
+description: Local-first RAG platform -- FastAPI + Ollama + FAISS, with a Streamlit demo UI.
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/rafael-ceotto/konsole-ai
+sources:
+  - https://github.com/rafael-ceotto/konsole-ai
+maintainers:
+  - name: Konsole.ai

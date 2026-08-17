@@ -1,0 +1,28 @@
+# Copy this file to terraform.tfvars and adjust for a real apply.
+# This project has never run `terraform apply` -- see README.md in this
+# directory and docs/adr/0017-terraform-aws-eks-and-helm-chart.md.
+
+aws_region      = "us-east-1"
+cluster_name    = "konsole-ai"
+cluster_version = "1.33"
+
+vpc_cidr = "10.0.0.0/16"
+azs      = ["us-east-1a", "us-east-1b"]
+
+node_instance_types     = ["t3.large"]
+node_group_min_size     = 1
+node_group_max_size     = 3
+node_group_desired_size = 1
+
+# Off by default -- a GPU node costs ~$300-800/month kept running (see
+# docs/adr/0014). Flip to true only for a bounded, intentional apply.
+enable_gpu_node_group = false
+gpu_instance_type     = "g4dn.xlarge"
+gpu_node_min_size     = 0
+gpu_node_max_size     = 1
+gpu_node_desired_size = 0
+
+tags = {
+  Project   = "konsole-ai"
+  ManagedBy = "terraform"
+}

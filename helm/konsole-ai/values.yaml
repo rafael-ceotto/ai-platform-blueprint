@@ -1,0 +1,134 @@
+# Default values for konsole-ai.
+# Every non-secret field here mirrors a docker-compose.yml environment
+# entry or a backend/config/settings.py Settings field 1:1 -- see
+# helm/konsole-ai/README.md for the mapping rationale.
+
+api:
+  image:
+    repository: konsole-ai-api
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # Fixed at 1, and deliberately no HPA object exists for `api` anywhere in
+  # this chart -- that absence *is* the enforcement, not an oversight.
+  # FAISS indexes (vector_store + ingestion log) and the SQLite LLM trace
+  # store (ADR-0015) are local files on one PVC; a second pod would mean
+  # two processes writing the same files, which FAISS/SQLite-on-a-shared-
+  # volume does not make safe. See docs/adr/0017.
+  replicaCount: 1
+
+  service:
+    port: 8000
+
+  persistence:
+    size: 5Gi
+    # Empty = cluster default StorageClass, so `kind`'s default works with
+    # zero --set overrides.
+    storageClassName: ""
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # Mirrors docker-compose.yml's `api.environment` block / Settings
+  # defaults. Values here are all non-secret; API_KEYS lives in
+  # `secrets.apiKeys` below instead.
+  env:
+    APP_NAME: "Konsole.ai"
+    ENVIRONMENT: "local"
+    LOG_LEVEL: "INFO"
+    LOG_JSON: "true"
+    API_V1_PREFIX: "/api/v1"
+    OLLAMA_MODEL: "llama3.1:8b"
+    # Both off by default -- same reasoning as docker-compose.yml's
+    # "observability" profile (ADR-0011): this chart doesn't ship
+    # jaeger/prometheus/grafana templates (v1 scope, see ADR-0017's
+    # revisit triggers), so there's nothing to export/scrape to yet.
+    TRACING_ENABLED: "false"
+    METRICS_ENABLED: "false"
+    OTEL_SERVICE_NAME: "konsole-ai-api"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+    VECTOR_STORE_PATH: "./data/vector_store"
+    EMBEDDING_MODEL: "nomic-embed-text"
+    LOG_VECTOR_STORE_PATH: "./data/ingestion_logs"
+    LLM_TRACE_DB_PATH: "./data/llm_traces.db"
+    CHUNK_SIZE: "500"
+    CHUNK_OVERLAP: "50"
+    SEARCH_TOP_K_DEFAULT: "5"
+    RATE_LIMIT_REQUESTS: "60"
+    RATE_LIMIT_WINDOW_SECONDS: "60"
+    MAX_UPLOAD_SIZE_BYTES: "10000000"
+    RERANK_TOP_N: "3"
+    CORS_ORIGINS: '["http://localhost:3000"]'
+
+# Matches Settings.API_KEYS' existing dev default exactly (.env.example,
+# docker-compose.yml's ui.environment.API_KEY). ANY REAL DEPLOYMENT MUST
+# OVERRIDE THIS -- same warning that default already carries everywhere
+# else in this project. Plain env var via Secret, no external
+# secrets-manager integration -- this project has never used more than
+# that for secrets.
+secrets:
+  apiKeys: '["dev-local-key"]'
+
+ollama:
+  image:
+    repository: ollama/ollama
+    tag: latest
+
+  persistence:
+    # Models (~5GB for the two pulled in the README quickstart) + headroom.
+    size: 50Gi
+    storageClassName: ""
+
+  service:
+    port: 11434
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+
+  # Mirrors Terraform's `enable_gpu_node_group` toggle in terraform/
+  # (default false there too). taintKey/taintValue MUST stay set to the
+  # exact same literals as terraform/variables.tf's gpu_taint_key /
+  # gpu_taint_value -- the one contract shared between these two
+  # independently-validated artifacts (see docs/adr/0017).
+  gpu:
+    enabled: false
+    taintKey: "nvidia.com/gpu"
+    taintValue: "true"
+    # NVIDIA device-plugin convention: request N nvidia.com/gpu extended
+    # resources.
+    resourceLimit: 1
+
+ui:
+  image:
+    repository: konsole-ai-ui
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 8501
+
+  # The only component in this chart that safely autoscales -- it's a
+  # stateless HTTP client to `api` (ui/app.py + ui/api_client.py, ADR-0010),
+  # no local state of its own.
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+  # Matches secrets.apiKeys' default -- the UI authenticates to the API
+  # the same way docker-compose.yml's `ui.environment.API_KEY` does.
+  apiKey: "dev-local-key"
+
+ingress:
+  enabled: false
+  className: "nginx"
+  host: "konsole-ai.local"
+  tls:
+    enabled: false

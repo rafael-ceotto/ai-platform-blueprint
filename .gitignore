@@ -40,3 +40,15 @@ Thumbs.db
 
 # --- Docker ---
 docker-compose.override.yml
+
+# --- Terraform ---
+# .terraform.lock.hcl IS committed (standard Terraform practice) -- only
+# the local cache/state below is ignored.
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "konsole-ai.fullname" . }}-api
+  labels:
+    {{- include "konsole-ai.labels" . | nindent 4 }}
+data:
+  OLLAMA_BASE_URL: "http://{{ include "konsole-ai.fullname" . }}-ollama:{{ .Values.ollama.service.port }}"
+  {{- range $key, $value := .Values.api.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

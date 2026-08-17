@@ -1,0 +1,36 @@
+Konsole.ai ({{ .Chart.Name }} {{ .Chart.Version }}) has been installed as
+release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+This chart has only ever been validated via `helm lint`, `helm template`,
+and a local `kind` smoke test (`make kind-smoke-test`) -- it has never been
+installed against a real cloud cluster. See docs/adr/0017.
+
+1. First run only: pull the two models Ollama needs (there's no automated
+   pull step for a real cluster, unlike the docker-compose.yml quickstart):
+
+     kubectl exec -it {{ include "konsole-ai.fullname" . }}-ollama-0 -- ollama pull {{ .Values.api.env.OLLAMA_MODEL }}
+     kubectl exec -it {{ include "konsole-ai.fullname" . }}-ollama-0 -- ollama pull {{ .Values.api.env.EMBEDDING_MODEL }}
+
+2. Reach the API and UI locally:
+
+     kubectl port-forward svc/{{ include "konsole-ai.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }}
+     kubectl port-forward svc/{{ include "konsole-ai.fullname" . }}-ui {{ .Values.ui.service.port }}:{{ .Values.ui.service.port }}
+
+   Then open http://localhost:{{ .Values.ui.service.port }} (UI) or
+   http://localhost:{{ .Values.api.service.port }}/docs (Swagger).
+
+{{- if .Values.ingress.enabled }}
+
+3. Ingress is enabled at host {{ .Values.ingress.host }} -- point DNS/hosts
+   at your ingress controller's address to use it instead of port-forward.
+{{- end }}
+
+{{- if .Values.ollama.gpu.enabled }}
+
+GPU scheduling is enabled: the ollama pod tolerates and is scheduled onto
+nodes labeled/tainted {{ .Values.ollama.gpu.taintKey }}={{ .Values.ollama.gpu.taintValue }}.
+This must match the taint terraform/ applies to its optional GPU node
+group (terraform/variables.tf's gpu_taint_key / gpu_taint_value) --
+these two artifacts are validated independently and only agree on this
+one string pair.
+{{- end }}

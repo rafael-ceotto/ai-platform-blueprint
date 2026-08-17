@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "konsole-ai.fullname" . }}-ollama
+  labels:
+    {{- include "konsole-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  serviceName: {{ include "konsole-ai.fullname" . }}-ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "konsole-ai.selectorLabels" (dict "root" $ "component" "ollama") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "konsole-ai.selectorLabels" (dict "root" $ "component" "ollama") | nindent 8 }}
+    spec:
+      {{- if .Values.ollama.gpu.enabled }}
+      tolerations:
+        - key: {{ .Values.ollama.gpu.taintKey | quote }}
+          operator: Equal
+          value: {{ .Values.ollama.gpu.taintValue | quote }}
+          effect: NoSchedule
+      nodeSelector:
+        {{ .Values.ollama.gpu.taintKey }}: {{ .Values.ollama.gpu.taintValue | quote }}
+      {{- end }}
+      containers:
+        - name: ollama
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          ports:
+            - name: http
+              containerPort: 11434
+          livenessProbe:
+            exec:
+              command: ["ollama", "list"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              {{- toYaml .Values.ollama.resources.requests | nindent 14 }}
+            {{- if .Values.ollama.gpu.enabled }}
+            limits:
+              nvidia.com/gpu: {{ .Values.ollama.gpu.resourceLimit | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /root/.ollama
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.ollama.persistence.storageClassName }}
+        storageClassName: {{ .Values.ollama.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ollama.persistence.size }}

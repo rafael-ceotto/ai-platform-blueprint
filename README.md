@@ -64,11 +64,16 @@ Python install too.
 - Also runs as an **MCP server** (`mcp_server/`, stdio) — `ask`/`search`/
   `ingest_text` as tools any MCP client (e.g. Claude Desktop) can call,
   zero hosting cost (see ADR-0016).
+- Ships as a `kind`-validated Kubernetes **Helm chart** (`helm/konsole-ai/`),
+  plus **Terraform** (`terraform/`) for a full AWS EKS cluster — both
+  static, locally-validated artifacts only, never applied against a live
+  cloud account (see ADR-0014, ADR-0017).
 
 ## Tech Stack
 
 FastAPI · Ollama · FAISS · LangChain / LangGraph · Streamlit · MCP ·
-OpenTelemetry + Prometheus + Grafana · Docker Compose · pytest / ruff / mypy
+OpenTelemetry + Prometheus + Grafana · Docker Compose · pytest / ruff / mypy ·
+Terraform · Kubernetes / Helm
 
 Every non-obvious choice — why FAISS over Qdrant, why local Ollama over
 a hosted API, why hybrid retrieval, why the UI ships as its own image —
