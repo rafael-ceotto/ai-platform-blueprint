@@ -6,6 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Pick up Debian security patches (e.g. util-linux/libblkid CVEs) that land
+# between python:3.12-slim image publishes -- the base image tag is mutable
+# and doesn't always carry the latest fixes, so pull them explicitly rather
+# than waiting on an upstream rebuild.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system ui && useradd --system --gid ui --home-dir /app ui
 
 WORKDIR /app
